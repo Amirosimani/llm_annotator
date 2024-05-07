@@ -1,15 +1,19 @@
 import asyncio
-import aiohttp
-from datasets import load_dataset
+from asynciolimiter import Limiter
 
 import vertexai
 from vertexai.generative_models import GenerativeModel
 import vertexai.preview.generative_models as generative_models
 
-seed =42
+QPM = 5
+PROJECT = "amir-genai-bb"
+LOCATION = "us-central1"
 
-async def fetch(prompt):
-    vertexai.init(project="amir-genai-bb", location="us-central1")
+rate_limiter = Limiter(QPM/60) # Limit to 5 requests per 60 second
+
+
+async def gemini(prompt):
+    vertexai.init(project=PROJECT, location=LOCATION)
 
     generation_config = {
         "max_output_tokens": 2048,
@@ -29,6 +33,8 @@ async def fetch(prompt):
                              "Your mission is to label the input data based on the instruction you will receive.",
                              ],
                         )
+    await rate_limiter.wait()
+
     responses = model.generate_content(
       [prompt],
       generation_config=generation_config,
@@ -38,14 +44,17 @@ async def fetch(prompt):
     return(responses.text)
 
 
-async def main(prompts):
-    tasks = []
-    for url in prompts:
-        tasks.append(asyncio.create_task(fetch(url)))
-    
-    results = await asyncio.gather(*tasks)
-    print(results)
+async def main(prompts, model):
 
+    if model == "gemini":
+        tasks = []
+        for url in prompts:
+            tasks.append(asyncio.create_task(gemini(url)))
+        
+        results = await asyncio.gather(*tasks) # the order of result values is preserved, but the execution order is not. https://docs.python.org/3/library/asyncio-task.html#running-tasks-concurrently
+        print(results)
+    else:
+        print("Wrong model")
 
 
 if __name__ == "__main__":

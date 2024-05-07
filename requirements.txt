@@ -1,2 +1,4 @@
-datasets==-2.19.1
+# datasets==-2.19.1
+asyncio
+asynciolimiter==1.0.0
 google-cloud-aiplatform
