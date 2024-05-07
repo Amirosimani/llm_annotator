@@ -1,4 +1,4 @@
 # datasets==-2.19.1
-asyncio
+asyncio==1.0.0
 asynciolimiter==1.0.0
-google-cloud-aiplatform
+google-cloud-aiplatform==1.48.0
