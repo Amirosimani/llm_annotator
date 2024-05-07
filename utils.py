@@ -1,3 +1,4 @@
+import re
 import asyncio
 from asynciolimiter import Limiter
 
@@ -11,13 +12,30 @@ LOCATION = "us-central1"
 
 rate_limiter = Limiter(QPM/60) # Limit to 5 requests per 60 second
 
+def _extract_binary_values(response_text):
+    """Extracts 0 or 1 values from a list of strings, prioritizing single digits.
+    Args:
+        string_list: A list of strings potentially containing 0s or 1s.
+    Returns:
+        A list of integers (0 or 1) extracted from the strings.
+    """
+
+    pattern = r"\b[01]\b"  # Matches standalone 0 or 1
+
+    match = re.search(pattern, response_text)
+    if match:
+        return int(match.group())  # Convert to integer
+    else:
+        print("Response format is not correct")
+        None
+
 
 async def gemini(prompt):
     vertexai.init(project=PROJECT, location=LOCATION)
 
     generation_config = {
         "max_output_tokens": 2048,
-        "temperature": 1,
+        "temperature": 0.1,
         "top_p": 1,
     }
 
@@ -41,7 +59,7 @@ async def gemini(prompt):
       safety_settings=safety_settings,
       stream=False,
   )
-    return(responses.text)
+    return(_extract_binary_values(responses.text))
 
 
 async def main(prompts, model):
@@ -53,6 +71,7 @@ async def main(prompts, model):
         
         results = await asyncio.gather(*tasks) # the order of result values is preserved, but the execution order is not. https://docs.python.org/3/library/asyncio-task.html#running-tasks-concurrently
         print(results)
+        return results
     else:
         print("Wrong model")
 
