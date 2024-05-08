@@ -3,6 +3,7 @@ import asyncio
 from asynciolimiter import Limiter
 from typing import Any, Dict, List, Tuple, Optional
 
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 
 import vertexai
 from vertexai.generative_models import GenerativeModel
@@ -119,6 +120,17 @@ class Annotate:
         else:
             raise ValueError(f"Unsupported model: {model}")
         
+
+class Evaluate():
+
+    @staticmethod
+    def TextClfWithGT(y_true, y_pred):
+        clf_metrics = {"accuracy": accuracy_score(y_true, y_pred),
+                       "f1_weighted": f1_score(y_true, y_pred, average='weighted'),
+                       "confusion_matrix": confusion_matrix(y_true, y_pred)
+                       }
+        return clf_metrics
+
 
 
 if __name__ == "__main__":
