@@ -9,8 +9,13 @@ import vertexai
 from vertexai.generative_models import GenerativeModel
 import vertexai.preview.generative_models as generative_models
 
+from anthropic import AnthropicVertex
 
-gemini_config = {"project_config": {"qpm":5,
+
+VALID_MODELS = ["gemini", "claude"]
+
+
+GEMINI_CONFIG = {"project_config": {"qpm":5,
                                     "project": "amir-genai-bb",
                                     "location": "us-central1"},
                 "generation_config": {"max_output_tokens": 2048,
@@ -19,17 +24,19 @@ gemini_config = {"project_config": {"qpm":5,
                                       }
 }
 
+CLAUDE_CONFIG = {"project_config": {"qpm":60,  # https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude
+                                    "project": "cloud-llm-preview1",
+                                    "location": "us-central1"},
+                "generation_config": ""
+
+}
+
 
 class Annotate:
-    def __init__(self, gemini_config= gemini_config):
+    def __init__(self, gemini_config= GEMINI_CONFIG, claude_config=CLAUDE_CONFIG):
 
-        self.qpm = gemini_config["project_config"]["qpm"]
-        self.rate_limiter = Limiter(self.qpm/60) # Limit to 5 requests per 60 second
-        
-        self.project = gemini_config["project_config"]["project"]
-        self.location = gemini_config["project_config"]["location"]
-
-        self.gemini_generation_config = gemini_config["generation_config"]
+        self.gemini_config = gemini_config
+        self.claude_config = claude_config
 
     @staticmethod
     def __extract_binary_values(response_text: str) -> Optional[int]:
@@ -69,7 +76,8 @@ class Annotate:
         """
 
         
-        vertexai.init(project=self.project, location=self.location)
+        vertexai.init(project=self.gemini_config["project_config"]["project"], 
+                      location=self.gemini_config["project_config"]["location"])
 
         safety_settings = {
             generative_models.HarmCategory.HARM_CATEGORY_HATE_SPEECH: generative_models.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
@@ -77,30 +85,72 @@ class Annotate:
             generative_models.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: generative_models.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
             generative_models.HarmCategory.HARM_CATEGORY_HARASSMENT: generative_models.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
         }
+
+        rate_limiter = Limiter(self.gemini_config["project_config"]["qpm"]/60) # Limit to 5 requests per 60 second
         model = GenerativeModel("gemini-1.0-pro-002",
                             system_instruction=[
                                 "You are a helpful data labeler.",
                                 "Your mission is to label the input data based on the instruction you will receive.",
                                 ],
                             )
-        await self.rate_limiter.wait()
+        await rate_limiter.wait()
 
         responses = model.generate_content(
         [prompt],
-        generation_config=self.gemini_generation_config,
+        generation_config=self.gemini_config["generation_config"],
         safety_settings=safety_settings,
         stream=False,
     )
         return(Annotate.__extract_binary_values(responses.text))
 
 
-    async def TextClassification(self, prompts: List[str], model: str) ->  List[Any]:
+
+
+    async def __claude(self, prompt:str) -> List:
         """
+        Asynchronously generates labels for datapoints using Claude Haiku 
+        dataset order is presevered.
+
+        Args:
+            prompt: The text input to be classified.
+
+        Returns:
+            A boolean value representing the model's classification.
+
+
+        Raises:
+            VertexAIError: If there's an issue with the Vertex AI initialization or model call.
+            RateLimitExceededError: If the rate limiter indicates excessive API calls.
+            Any exceptions raised by the `Annotate.__extract_binary_values` function.
+        """
+        client = AnthropicVertex(region=self.claude_config["project_config"]["location"], 
+                                 project_id=self.claude_config["project_config"]["project"])
+
+
+        rate_limiter = Limiter(self.claude_config["project_config"]["qpm"]/60) # Limit to 60 requests per 60 second
+
+        await rate_limiter.wait()
+
+        responses = client.messages.create(
+            max_tokens=1024,
+            messages=[
+                {"role": "user",
+                 "content": prompt,
+                 }
+                 ],
+                 model="claude-3-haiku@20240307",
+                 )
+        return(Annotate.__extract_binary_values(responses.content[0].text))
+
+
+
+    async def TextClassification(self, prompts: List[str], model: str) ->  List[Any]:
+        f"""
         Performs text classification annotation using Gemini.
 
         Args:
             prompts: A list of text prompts to classify.
-            model: The name of the model to use for classification ("gemini" is currently supported).
+            model: The name of the model to use for classification ({VALID_MODELS} are currently supported).
 
         Returns:
             A list of classification results (the format depends on the model used).
@@ -108,17 +158,22 @@ class Annotate:
         Raises:
             ValueError: If an unsupported model is specified.
         """
+        if model not in VALID_MODELS:
+            raise ValueError(f"Unsupported model: {VALID_MODELS} - has to be one ")
+        elif model == "gemini":
+            generate_func = self.__gemini
+        elif model == "claude":
+            generate_func = self.__claude
 
-        if model == "gemini":
-            tasks = []
-            for url in prompts:
-                tasks.append(asyncio.create_task(self.__gemini(url)))
-            
-            results = await asyncio.gather(*tasks) # the order of result values is preserved, but the execution order is not. https://docs.python.org/3/library/asyncio-task.html#running-tasks-concurrently
-            print(results)
-            return results
-        else:
-            raise ValueError(f"Unsupported model: {model}")
+        
+
+        tasks = []
+        for q in prompts:
+            tasks.append(asyncio.create_task(generate_func(q)))
+        
+        results = await asyncio.gather(*tasks) # the order of result values is preserved, but the execution order is not. https://docs.python.org/3/library/asyncio-task.html#running-tasks-concurrently
+        print(results)
+        return results
         
 
 class Evaluate():
