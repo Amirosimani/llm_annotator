@@ -1,7 +1,12 @@
 import re
 import asyncio
+from collections import Counter
+from itertools import combinations
 from asynciolimiter import Limiter
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional
+
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 
@@ -179,12 +184,102 @@ class Annotate:
 class Evaluate():
 
     @staticmethod
-    def TextClfWithGT(y_true, y_pred):
+    def TextClfWithGT(y_true: List[int], y_pred: List[int]) -> Dict[str, Any]:
         clf_metrics = {"accuracy": accuracy_score(y_true, y_pred),
                        "f1_weighted": f1_score(y_true, y_pred, average='weighted'),
                        "confusion_matrix": confusion_matrix(y_true, y_pred)
                        }
         return clf_metrics
+    
+    @staticmethod
+    def _GetMajorityVote(list_of_lists: List[List[int]]) -> List[int]:
+        """
+        Finds the majority value for each element across multiple lists.
+
+        Args:
+            list_of_lists: A list containing the multiple lists to compare.
+
+        Returns:
+            A list of majority values corresponding to each element position. 
+        """
+        majority_values = []
+        # Iterate over the zipped lists to get elements at the same positions across all lists.
+        for elements in zip(*list_of_lists):
+            # Create a Counter to count the frequency of each element.
+            element_counts = Counter(elements)
+            # Get the most common element (with frequency)
+            most_common_element = element_counts.most_common(1)[0]
+            # Extract the element itself and append it to the results list.
+            majority_values.append(most_common_element[0])
+        return majority_values
+    
+    
+    def PairwiseComparison(self, list_of_lists: List[List[Any]], include_majority=True, visualzie=True) -> List[List[bool]]:
+        """
+        Performs pairwise comparisons of elements in multiple lists and returns a 2D boolean array.
+
+        This function iterates over all possible pairs of lists within `list_of_lists`. For each pair, it compares corresponding elements and creates a boolean list where True indicates equality.  
+
+        Optionally, it can include the majority vote of all lists as an additional list for comparison.
+
+        Args:
+            list_of_lists: A list containing the lists to compare.
+            include_majority (bool, optional): If True, the majority vote of all lists is included as an extra list for comparison. Defaults to True.
+            visualize (bool, optional): If True, a heatmap visualization of the comparison matrix is generated. Defaults to True.
+
+        Returns:
+            A 2D list of boolean values. Each inner list represents the comparison results for one pair of lists:
+                - True:  Elements at corresponding indices are equal.
+                - False: Elements at corresponding indices are not equal.
+
+        Raises:
+            ValueError: If `list_of_lists` is empty.
+
+        Examples:
+            >>> list_of_lists = [[1, 2, 3], [1, 3, 2], [4, 5, 6]]
+            >>> PairwiseComparison(list_of_lists)
+            [[True, False, False], [False, False, False], [False, False, False]]
+
+        Notes:
+            - If `include_majority` is True, the majority vote calculation assumes that all lists have the same length.
+            - The visualization uses a heatmap where green indicates equality and red indicates inequality.
+        """
+        result = []
+
+        if include_majority:
+            list_of_lists.append(self._GetMajorityVote(list_of_lists))
+
+        for list1, list2 in combinations(list_of_lists, 2):
+            comparison = [x == y for x, y in zip(list1, list2)]
+            result.append(comparison)
+
+        return result
+    
+
+    @staticmethod
+    def visualize_boolean_array(arr, y_labels):
+        """Visualizes a 2D boolean array using a heatmap.
+
+        Args:
+            arr: The 2D boolean array.
+            title: Title for the plot (optional).
+        """
+        # Convert to numpy array for compatibility
+        plt.figure(figsize=(8, 6))  # Adjust the figure size as needed
+        sns.heatmap(arr, cmap=["green", "red"], 
+                    cbar=False, 
+                    annot=True, 
+                    fmt="d",
+                    linewidths=1,
+                    yticklabels=y_labels)
+
+        plt.title("Pairwise Comparison")
+        plt.yticks(rotation=90)
+        plt.xlabel("Data points")
+        plt.ylabel("List Index")
+        plt.tight_layout()
+        plt.show()
+
 
 
 
