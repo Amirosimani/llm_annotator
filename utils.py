@@ -7,15 +7,26 @@ from vertexai.generative_models import GenerativeModel
 import vertexai.preview.generative_models as generative_models
 
 
+gemini_config = {"project_config": {"qpm":5,
+                                    "project": "amir-genai-bb",
+                                    "location": "us-central1"},
+                "generation_config": {"max_output_tokens": 2048,
+                                      "temperature": 0.1,
+                                      "top_p": 1,
+                                      }
+}
+
 
 class Annotate:
-    def __init__(self):
+    def __init__(self, gemini_config= gemini_config):
 
-        self.qpm = 5
+        self.qpm = gemini_config["project_config"]["qpm"]
         self.rate_limiter = Limiter(self.qpm/60) # Limit to 5 requests per 60 second
         
-        self.project = "amir-genai-bb"
-        self.location = "us-central1"
+        self.project = gemini_config["project_config"]["project"]
+        self.location = gemini_config["project_config"]["location"]
+
+        self.gemini_generation_config = gemini_config["generation_config"]
 
     @staticmethod
     def __extract_binary_values(response_text):
@@ -40,12 +51,6 @@ class Annotate:
         
         vertexai.init(project=self.project, location=self.location)
 
-        generation_config = {
-            "max_output_tokens": 2048,
-            "temperature": 0.1,
-            "top_p": 1,
-        }
-
         safety_settings = {
             generative_models.HarmCategory.HARM_CATEGORY_HATE_SPEECH: generative_models.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
             generative_models.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: generative_models.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
@@ -62,7 +67,7 @@ class Annotate:
 
         responses = model.generate_content(
         [prompt],
-        generation_config=generation_config,
+        generation_config=self.gemini_generation_config,
         safety_settings=safety_settings,
         stream=False,
     )
