@@ -1,6 +1,8 @@
 import re
 import asyncio
 from asynciolimiter import Limiter
+from typing import Any, Dict, List, Tuple, Optional
+
 
 import vertexai
 from vertexai.generative_models import GenerativeModel
@@ -29,7 +31,7 @@ class Annotate:
         self.gemini_generation_config = gemini_config["generation_config"]
 
     @staticmethod
-    def __extract_binary_values(response_text):
+    def __extract_binary_values(response_text: str) -> Optional[int]:
         """Extracts 0 or 1 values from a list of strings, prioritizing single digits.
         Args:
             string_list: A list of strings potentially containing 0s or 1s.
@@ -44,10 +46,27 @@ class Annotate:
             return int(match.group())  # Convert to integer
         else:
             print("Response format is not correct")
-            None
+            return None
 
 
-    async def __gemini(self, prompt):
+    async def __gemini(self, prompt:str) -> List:
+        """
+        Asynchronously generates labels for datapoints using a Gemini Pro text 
+        dataset order is presevered. safety measures are in place.
+
+        Args:
+            prompt: The text input to be classified.
+
+        Returns:
+            A boolean value representing the model's classification.
+
+
+        Raises:
+            VertexAIError: If there's an issue with the Vertex AI initialization or model call.
+            RateLimitExceededError: If the rate limiter indicates excessive API calls.
+            Any exceptions raised by the `Annotate.__extract_binary_values` function.
+        """
+
         
         vertexai.init(project=self.project, location=self.location)
 
@@ -74,7 +93,20 @@ class Annotate:
         return(Annotate.__extract_binary_values(responses.text))
 
 
-    async def TextClassification(self, prompts, model):
+    async def TextClassification(self, prompts: List[str], model: str) ->  List[Any]:
+        """
+        Performs text classification annotation using Gemini.
+
+        Args:
+            prompts: A list of text prompts to classify.
+            model: The name of the model to use for classification ("gemini" is currently supported).
+
+        Returns:
+            A list of classification results (the format depends on the model used).
+
+        Raises:
+            ValueError: If an unsupported model is specified.
+        """
 
         if model == "gemini":
             tasks = []
@@ -85,7 +117,8 @@ class Annotate:
             print(results)
             return results
         else:
-            print("Wrong model")
+            raise ValueError(f"Unsupported model: {model}")
+        
 
 
 if __name__ == "__main__":
