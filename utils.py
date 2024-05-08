@@ -5,10 +5,6 @@ from itertools import combinations
 from asynciolimiter import Limiter
 from typing import Any, Dict, List, Optional
 
-import seaborn as sns
-import matplotlib.pyplot as plt
-
-from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 
 import vertexai
 from vertexai.generative_models import GenerativeModel
@@ -185,11 +181,12 @@ class Evaluate():
 
     @staticmethod
     def TextClfWithGT(y_true: List[int], y_pred: List[int]) -> Dict[str, Any]:
-        clf_metrics = {"accuracy": accuracy_score(y_true, y_pred),
+        from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+
+        return {"accuracy": accuracy_score(y_true, y_pred),
                        "f1_weighted": f1_score(y_true, y_pred, average='weighted'),
                        "confusion_matrix": confusion_matrix(y_true, y_pred)
                        }
-        return clf_metrics
     
     @staticmethod
     def _GetMajorityVote(list_of_lists: List[List[int]]) -> List[int]:
@@ -264,7 +261,9 @@ class Evaluate():
             arr: The 2D boolean array.
             title: Title for the plot (optional).
         """
-        # Convert to numpy array for compatibility
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+
         plt.figure(figsize=(8, 6))  # Adjust the figure size as needed
         sns.heatmap(arr, cmap=["green", "red"], 
                     cbar=False, 
