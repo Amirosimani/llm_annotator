@@ -105,8 +105,6 @@ class Annotate:
         return(Annotate.__extract_binary_values(responses.text))
 
 
-
-
     async def __claude(self, prompt:str) -> List:
         """
         Asynchronously generates labels for datapoints using Claude Haiku 
@@ -261,7 +259,7 @@ class Evaluate():
 
         if visualize and y_labels is not None:
             self.__graph_label_agreement(m, y_labels)
-            return max
+            return m
         elif visualize and y_labels is None:
             raise ValueError(f"Pass y_labels when visualize==True")
         else:
