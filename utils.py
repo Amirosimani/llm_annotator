@@ -1,4 +1,5 @@
 import re
+import logging
 import asyncio
 from collections import Counter
 from itertools import combinations
@@ -35,10 +36,14 @@ CLAUDE_CONFIG = {"project_config": {"qpm":60,  # https://cloud.google.com/vertex
 
 
 class Annotate:
-    def __init__(self, gemini_config= GEMINI_CONFIG, claude_config=CLAUDE_CONFIG):
+    def __init__(self, gemini_config= GEMINI_CONFIG, claude_config=CLAUDE_CONFIG, verbose=False):
 
         self.gemini_config = gemini_config
         self.claude_config = claude_config
+
+         # Initialize logger with the desired level based on verbose setting
+        self.logger = logging.getLogger('Annotate')
+        self.logger.setLevel(logging.DEBUG if verbose else logging.ERROR)  
 
     @staticmethod
     def __extract_binary_values(response_text: str) -> Optional[int]:
@@ -96,13 +101,18 @@ class Annotate:
                                 ],
                             )
         await rate_limiter.wait()
-
-        responses = model.generate_content(
-        [prompt],
-        generation_config=self.gemini_config["generation_config"],
-        safety_settings=safety_settings,
-        stream=False,
-    )
+        try:
+            self.logger.debug(f"Sending prompt to Gemini: {prompt}")    
+            responses = model.generate_content(
+                [prompt],
+                generation_config=self.gemini_config["generation_config"],
+                safety_settings=safety_settings,
+                stream=False,
+                )
+        except Exception as e:
+            self.logger.error(f"Error in __gemini: {e}") 
+            raise
+        self.logger.info(f"Gemini response received.")  # Info log
         return(Annotate.__extract_binary_values(responses.text))
 
 
@@ -130,16 +140,21 @@ class Annotate:
         rate_limiter = Limiter(self.claude_config["project_config"]["qpm"]/60) # Limit to 60 requests per 60 second
 
         await rate_limiter.wait()
-
-        responses = client.messages.create(
-            max_tokens=1024,
-            messages=[
-                {"role": "user",
-                 "content": prompt,
-                 }
-                 ],
-                 model="claude-3-haiku@20240307",
-                 )
+        try:
+            self.logger.debug(f"Sending prompt to Claude: {prompt}")
+            responses = client.messages.create(
+                max_tokens=1024,
+                messages=[
+                    {"role": "user",
+                    "content": prompt,
+                    }
+                    ],
+                    model="claude-3-haiku@20240307",
+                    )
+        except Exception as e:
+            self.logger.error(f"Error in __claude: {e}")
+            raise
+        self.logger.info(f"Claude response received.")  # Info log
         return(Annotate.__extract_binary_values(responses.content[0].text))
 
 
@@ -159,6 +174,7 @@ class Annotate:
             ValueError: If an unsupported model is specified.
         """
         if model not in VALID_MODELS:
+            self.logger.error(f"Unsupported model: {model}")
             raise ValueError(f"Unsupported model: {VALID_MODELS} - has to be one ")
         elif model == "gemini":
             generate_func = self.__gemini
@@ -172,11 +188,17 @@ class Annotate:
             tasks.append(asyncio.create_task(generate_func(q)))
         
         results = await asyncio.gather(*tasks) # the order of result values is preserved, but the execution order is not. https://docs.python.org/3/library/asyncio-task.html#running-tasks-concurrently
-        print(results)
+        self.logger.debug(f"Classification results: {results}")  # Debug log for results
         return results
         
 
 class Evaluate():
+
+    def __init__(self,verbose=False):
+
+         # Initialize logger with the desired level based on verbose setting
+        self.logger = logging.getLogger('Annotate')
+        self.logger.setLevel(logging.DEBUG if verbose else logging.ERROR)  
 
     @staticmethod
     def calculate_classification_metrics(y_true: List[int], y_pred: List[int]) -> Dict[str, Any]:
@@ -252,12 +274,13 @@ class Evaluate():
 
 
     def classification(self, generated_labels, strategy="majority", visualize=False, y_labels=None):
+        self.logger.debug(f"Evaluating classification with strategy: {strategy}")
 
         if strategy == "majority":
             agg = self.__get_majority_vote(generated_labels)
         
         m = self.__element_wise_comparison(generated_labels, agg)
-
+        self.logger.info(f"Evaluation complete.")
         if visualize and y_labels is not None:
             self.__graph_label_agreement(m, y_labels)
             return m
@@ -275,11 +298,11 @@ class Evaluate():
 
 
 if __name__ == "__main__":
-    ann = Annotate()
+    ann = Annotate(verbose=True)
     import time
     s = time.perf_counter()
     prompts = ["where is paris?", "whare is tehran"]
-    asyncio.run(ann.TextClassification(prompts, model="gemini"))
+    asyncio.run(ann.classification(prompts, model="gemini"))
     elapsed = time.perf_counter() - s
     print(f"{__file__} executed in {elapsed:0.2f} seconds.")
 
