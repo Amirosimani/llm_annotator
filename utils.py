@@ -1,6 +1,8 @@
 import re
 import logging
 import asyncio
+import numpy as np
+import scipy as sp
 from collections import Counter
 from itertools import combinations
 from asynciolimiter import Limiter
@@ -36,7 +38,7 @@ CLAUDE_CONFIG = {"project_config": {"qpm":60,  # https://cloud.google.com/vertex
 
 def init_logger():
     global logger
-    logger = logging.getLogger('GLAD')
+    logger = logging.getLogger('base')
     logger.setLevel(logging.DEBUG)
     log_fmt = '%(asctime)s/%(name)s[%(levelname)s]: %(message)s'
     logging.basicConfig(format=log_fmt)
@@ -222,9 +224,235 @@ class Aggregate():
             majority_values.append(most_common_element[0])
         return majority_values
     
+    def _glad(self, list_of_labels: List[List[int]], verbose=False) -> List[int]:
+
+        THRESHOLD = 1e-5
+
+        def Dataset(**kwargs):
+            """Function to create a dataset-like dictionary."""
+            return kwargs
+
+        def load_data(arr):
+            data = Dataset(
+                numLabels=sum(len(sublist) for sublist in arr),
+                numLabelers=len(arr),
+                numTasks=len(arr[0]),
+                numClasses=len(set(arr[0])),
+                priorZ=np.repeat(1 / len(set(arr[0])), len(set(arr[0]))),
+                labels=np.array(list(map(list, zip(*arr))))
+            )
+
+            assert np.isclose(data['priorZ'].sum(), 1), 'Incorrect priorZ given'
+
+            data['priorAlpha'] = np.ones(data['numLabelers'])
+            data['priorBeta'] = np.ones(data['numTasks'])
+            data['probZ'] = np.empty((data['numTasks'], data['numClasses']))
+            data['beta'] = np.empty(data['numTasks'])
+            data['alpha'] = np.empty(data['numLabelers'])
+
+            return data
+        
+        def sigmoid(x):
+            return 1.0 / (1.0 + np.exp(-x))
+
+        def logsigmoid(x):
+            return - np.logaddexp(0, -x)
+        
+
+        def EM(data):
+            data["alpha"] = data["priorAlpha"].copy()
+            data["beta"] = data["priorBeta"].copy()
+            data["probZ"][:] = data["priorZ"][:]
+
+            print(data["probZ"][:])
+
+            EStep(data)
+            lastQ = computeQ(data)
+            MStep(data)
+            Q = computeQ(data)
+            counter = 1
+            while abs((Q - lastQ) / lastQ) > THRESHOLD:
+                if verbose:
+                    logger.info('EM: iter={}'.format(counter))
+                lastQ = Q
+                EStep(data)
+                MStep(data)
+                Q = computeQ(data)
+                counter += 1
+
+        def calcLogProbL(item, *args):
+            data = args[-1]
+            print(data["alpha"], data["labels"])
+
+            j = int(item[0])
+            delta = args[0][j]
+            noResp = args[1][j]
+            oneMinusDelta = (~delta) & (~noResp)
+
+            exponents = item[1:]
+
+            correct = logsigmoid(exponents[delta]).sum()
+            wrong = (logsigmoid(-exponents[oneMinusDelta]) - np.log(float(data["numClasses"] - 1))).sum()
+
+            return correct + wrong
+
+        def EStep(data):
+            data["probZ"] = np.tile(np.log(data["priorZ"]), data["numTasks"]).reshape(data["numTasks"], data["numClasses"])
+
+            ab = np.dot(np.array([np.exp(data["beta"])]).T, np.array([data["alpha"]]))
+            ab = np.c_[np.arange(data["numTasks"]), ab]
+            for k in range(data["numClasses"]):
+                data["probZ"][:, k] = np.apply_along_axis(calcLogProbL, 1, ab,
+                                                    (data["labels"] == k + 1),
+                                                    (data["labels"] == 0),
+                                                    data)  # Pass data as an additional argument
+
+            data["probZ"] = np.exp(data["probZ"])
+            s = data["probZ"].sum(axis=1)
+            data["probZ"] = (data["probZ"].T / s).T
+            assert not np.any(np.isnan(data["probZ"])), 'Invalid Value [EStep]'
 
 
 
+        def df(x, *args):
+            data = args[0]
+            d = Dataset(labels=data["labels"], numLabels=data["numLabels"], numLabelers=data["numLabelers"],
+                        numTasks=data["numTasks"], numClasses=data["numClasses"],
+                        priorAlpha=data["priorAlpha"], priorBeta=data["priorBeta"],
+                        priorZ=data["priorZ"], probZ=data["probZ"])
+            unpackX(x, d)
+            dQdAlpha, dQdBeta = gradientQ(d)
+            return np.r_[-dQdAlpha, -dQdBeta]
+
+
+        def f(x, *args):
+            u"""Return the value of the objective function
+            """
+            data = args[0]
+            d = Dataset(labels=data["labels"], numLabels=data["numLabels"], numLabelers=data["numLabelers"],
+                        numTasks=data["numTasks"], numClasses=data["numClasses"],
+                        priorAlpha=data["priorAlpha"], priorBeta=data["priorBeta"],
+                        priorZ=data["priorZ"], probZ=data["probZ"])
+            unpackX(x, d)
+            return - computeQ(d)
+
+        def MStep(data):
+            initial_params = packX(data)
+            params = sp.optimize.minimize(fun=f, x0=initial_params, args=(data,), method='CG',
+                                        jac=df, tol=0.01,
+                                        options={'maxiter': 25, 'disp': verbose})
+            unpackX(params.x, data)
+
+
+        def computeQ(data):
+            Q = 0
+            Q += (data["probZ"] * np.log(data["priorZ"])).sum()
+
+            ab = np.dot(np.array([np.exp(data["beta"])]).T, np.array([data["alpha"]]))
+
+            logSigma = logsigmoid(ab)
+            idxna = np.isnan(logSigma)
+            if np.any(idxna):
+                logger.warning('an invalid value was assigned to np.log [computeQ]')
+                logSigma[idxna] = ab[idxna]
+
+            logOneMinusSigma = logsigmoid(-ab) - np.log(float(data["numClasses"] - 1))
+            idxna = np.isnan(logOneMinusSigma)
+            if np.any(idxna):
+                logger.warning('an invalid value was assigned to np.log [computeQ]')
+                logOneMinusSigma[idxna] = -ab[idxna]
+
+            for k in range(data["numClasses"]):
+                delta = (data["labels"] == k + 1)
+                Q += (data["probZ"][:, k] * logSigma.T).T[delta].sum()
+                oneMinusDelta = (data["labels"] != k + 1) & (data["labels"] != 0)
+                Q += (data["probZ"][:, k] * logOneMinusSigma.T).T[oneMinusDelta].sum()
+
+            Q += np.log(sp.stats.norm.pdf(data["alpha"] - data["priorAlpha"])).sum()
+            Q += np.log(sp.stats.norm.pdf(data["beta"] - data["priorBeta"])).sum()
+
+            if np.isnan(Q):
+                return -np.inf
+            return Q
+
+
+        def gradientQ(data):
+            dQdAlpha = - (data["alpha"] - data["priorAlpha"])
+            dQdBeta = - (data["beta"] - data["priorBeta"])
+
+            ab = np.exp(data["beta"])[:, np.newaxis] * data["alpha"]
+            sigma = sigmoid(ab)
+            sigma[np.isnan(sigma)] = 0
+
+            for k in range(data["numClasses"]):
+                delta = (data["labels"] == k + 1)
+                oneMinusDelta = (data["labels"] != k + 1) & (data["labels"] != 0)
+
+                dQdAlpha += (data["probZ"][:, k][:, np.newaxis] * np.exp(data["beta"])[:, np.newaxis] * (delta - sigma)).sum(axis=0)
+                dQdBeta += (data["probZ"][:, k][:, np.newaxis] * data["alpha"] * (delta - sigma)).sum(axis=1)
+
+            return dQdAlpha, dQdBeta
+
+
+        def dAlpha(item, *args):
+            i = int(item[0])
+            sigma_ab = item[1:]
+
+            delta = args[0][:, i]
+            noResp = args[1][:, i]
+            oneMinusDelta = (~delta) & (~noResp)
+
+            probZ = args[2]
+
+            data = args[3] 
+
+            correct = probZ[delta] * np.exp(data["beta"][delta]) * (1 - sigma_ab[delta])
+            wrong = probZ[oneMinusDelta] * np.exp(data["beta"][oneMinusDelta]) * (-sigma_ab[oneMinusDelta])
+
+            return correct.sum() + wrong.sum()
+
+
+        def dBeta(item, *args):
+            j = int(item[0])
+            sigma_ab = item[1:]
+
+            delta = args[0][j]
+            noResp = args[1][j]
+            oneMinusDelta = (~delta) & (~noResp)
+
+            probZ = args[2][j]
+            data = args[3] 
+
+            correct = probZ * data["alpha"][delta] * (1 - sigma_ab[delta])
+            wrong = probZ * data["alpha"][oneMinusDelta] * (-sigma_ab[oneMinusDelta])
+
+            return correct.sum() + wrong.sum()
+
+
+        def packX(data):
+            return np.r_[data["alpha"].copy(), data["beta"].copy()]
+
+
+        def unpackX(x, data):
+            data["alpha"] = x[:data["numLabelers"]].copy()
+            data["beta"] = x[data["numLabelers"]:].copy()
+
+
+        def output(data):
+            alpha = np.c_[np.arange(data["numLabelers"]), data["alpha"]]
+            beta = np.c_[np.arange(data["numTasks"]), np.exp(data["beta"])]
+            probZ = np.c_[np.arange(data["numTasks"]), data["probZ"]]
+            label = np.c_[np.arange(data["numTasks"]), np.argmax(data["probZ"], axis=1)]
+
+            return {"alpha": alpha,
+                    "beta": beta,
+                    "probZ": probZ,
+                    "labels": label}
+        
+
+        data = load_data(list_of_labels)
+        EM(data)
+        return output(data)
 
 
 class Evaluate():
