@@ -41,25 +41,6 @@ def init_logger():
     log_fmt = '%(asctime)s/%(name)s[%(levelname)s]: %(message)s'
     logging.basicConfig(format=log_fmt)
 
-class Data(object):
-    @classmethod
-    def glad_dataset(cls, labels=None, numLabels=-1, numLabelers=-1, numTasks=-1, numClasses=-1,
-                        priorAlpha=None, priorBeta=None, priorZ=None,
-                        alpha=None, beta=None, probZ=None):
-        dataset = cls()
-        dataset.labels = labels
-        dataset.numLabels = numLabels
-        dataset.numLabelers = numLabelers
-        dataset.numTasks = numTasks
-        dataset.numClasses = numClasses
-        dataset.priorAlpha = priorAlpha
-        dataset.priorBeta = priorBeta
-        dataset.priorZ = priorZ
-        dataset.alpha = alpha
-        dataset.beta = beta
-        dataset.probZ = probZ
-        return dataset
-
 
 class Annotate:
     def __init__(self, gemini_config= GEMINI_CONFIG, claude_config=CLAUDE_CONFIG, verbose=False):
