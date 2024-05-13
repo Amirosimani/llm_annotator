@@ -6,12 +6,11 @@ Creating and maintaining high-quality training data is essential for unlocking t
 ## Classification
 * Available models: Gemini, Claude
 * Available modality: Text
-* Avaialble tasks: Classfication (majority vote, GLAD ^1^ )
+* Avaialble tasks: Classfication (majority vote, GLAD <sup>1<sup> )
 
 
 
 
 
 # References
-1. [GLAD paper](https://proceedings.neurips.cc/paper_files/paper/2009/file/f899139df5e1059396431415e770c6dd-Paper.pdf)
-2. [GLAD implementation])(https://github.com/notani/python-glad/blob/master/glad.py#L58)
+1. [GLAD paper](https://proceedings.neurips.cc/paper_files/paper/2009/file/f899139df5e1059396431415e770c6dd-Paper.pdf) and implementation [referece](https://github.com/notani/python-glad/blob/master/glad.py#L58)
