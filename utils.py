@@ -34,6 +34,32 @@ CLAUDE_CONFIG = {"project_config": {"qpm":60,  # https://cloud.google.com/vertex
 
 }
 
+def init_logger():
+    global logger
+    logger = logging.getLogger('GLAD')
+    logger.setLevel(logging.DEBUG)
+    log_fmt = '%(asctime)s/%(name)s[%(levelname)s]: %(message)s'
+    logging.basicConfig(format=log_fmt)
+
+class Data(object):
+    @classmethod
+    def glad_dataset(cls, labels=None, numLabels=-1, numLabelers=-1, numTasks=-1, numClasses=-1,
+                        priorAlpha=None, priorBeta=None, priorZ=None,
+                        alpha=None, beta=None, probZ=None):
+        dataset = cls()
+        dataset.labels = labels
+        dataset.numLabels = numLabels
+        dataset.numLabelers = numLabelers
+        dataset.numTasks = numTasks
+        dataset.numClasses = numClasses
+        dataset.priorAlpha = priorAlpha
+        dataset.priorBeta = priorBeta
+        dataset.priorZ = priorZ
+        dataset.alpha = alpha
+        dataset.beta = beta
+        dataset.probZ = probZ
+        return dataset
+
 
 class Annotate:
     def __init__(self, gemini_config= GEMINI_CONFIG, claude_config=CLAUDE_CONFIG, verbose=False):
@@ -191,26 +217,10 @@ class Annotate:
         self.logger.debug(f"Classification results: {results}")  # Debug log for results
         return results
         
-
-class Evaluate():
-
-    def __init__(self,verbose=False):
-
-         # Initialize logger with the desired level based on verbose setting
-        self.logger = logging.getLogger('Annotate')
-        self.logger.setLevel(logging.DEBUG if verbose else logging.ERROR)  
+class Aggregate():
 
     @staticmethod
-    def calculate_classification_metrics(y_true: List[int], y_pred: List[int]) -> Dict[str, Any]:
-        from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
-
-        return {"accuracy": accuracy_score(y_true, y_pred),
-                       "f1_weighted": f1_score(y_true, y_pred, average='weighted'),
-                       "confusion_matrix": confusion_matrix(y_true, y_pred)
-                       }
-    
-    @staticmethod
-    def __get_majority_vote(list_of_labels: List[List[int]]) -> List[int]:
+    def _get_majority_vote(list_of_labels: List[List[int]]) -> List[int]:
         """
         Finds the majority value for each element across multiple lists.
 
@@ -230,6 +240,29 @@ class Evaluate():
             # Extract the element itself and append it to the results list.
             majority_values.append(most_common_element[0])
         return majority_values
+    
+
+
+
+
+
+class Evaluate():
+
+    def __init__(self,verbose=False):
+
+         # Initialize logger with the desired level based on verbose setting
+        self.logger = logging.getLogger('Annotate')
+        self.logger.setLevel(logging.DEBUG if verbose else logging.ERROR)  
+
+    @staticmethod
+    def calculate_classification_metrics(y_true: List[int], y_pred: List[int]) -> Dict[str, Any]:
+        from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
+
+        return {"accuracy": accuracy_score(y_true, y_pred),
+                       "f1_weighted": f1_score(y_true, y_pred, average='weighted'),
+                       "confusion_matrix": confusion_matrix(y_true, y_pred)
+                       }
+    
     
     @staticmethod
     def __element_wise_comparison(generated_labels, target_labels):
@@ -277,7 +310,7 @@ class Evaluate():
         self.logger.debug(f"Evaluating classification with strategy: {strategy}")
 
         if strategy == "majority":
-            agg = self.__get_majority_vote(generated_labels)
+            agg = Aggregate()._get_majority_vote(generated_labels)
         
         m = self.__element_wise_comparison(generated_labels, agg)
         self.logger.info(f"Evaluation complete.")
