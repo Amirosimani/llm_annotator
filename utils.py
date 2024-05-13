@@ -228,12 +228,12 @@ class Aggregate():
 
         THRESHOLD = 1e-5
 
-        def Dataset(**kwargs):
+        def glad_dataset(**kwargs):
             """Function to create a dataset-like dictionary."""
             return kwargs
 
         def load_data(arr):
-            data = Dataset(
+            data = glad_dataset(
                 numLabels=sum(len(sublist) for sublist in arr),
                 numLabelers=len(arr),
                 numTasks=len(arr[0]),
@@ -316,7 +316,7 @@ class Aggregate():
 
         def df(x, *args):
             data = args[0]
-            d = Dataset(labels=data["labels"], numLabels=data["numLabels"], numLabelers=data["numLabelers"],
+            d = glad_dataset(labels=data["labels"], numLabels=data["numLabels"], numLabelers=data["numLabelers"],
                         numTasks=data["numTasks"], numClasses=data["numClasses"],
                         priorAlpha=data["priorAlpha"], priorBeta=data["priorBeta"],
                         priorZ=data["priorZ"], probZ=data["probZ"])
@@ -329,7 +329,7 @@ class Aggregate():
             u"""Return the value of the objective function
             """
             data = args[0]
-            d = Dataset(labels=data["labels"], numLabels=data["numLabels"], numLabelers=data["numLabelers"],
+            d = glad_dataset(labels=data["labels"], numLabels=data["numLabels"], numLabelers=data["numLabelers"],
                         numTasks=data["numTasks"], numClasses=data["numClasses"],
                         priorAlpha=data["priorAlpha"], priorBeta=data["priorBeta"],
                         priorZ=data["priorZ"], probZ=data["probZ"])

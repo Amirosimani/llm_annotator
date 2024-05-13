@@ -6,7 +6,7 @@ Creating and maintaining high-quality training data is essential for unlocking t
 ## Classification
 * Available models: Gemini, Claude
 * Available modality: Text
-* Avaialble tasks: Classfication (majority vote, GLAD <sup>1<sup> )
+* Avaialble tasks: Classfication (majority vote, GLAD <sup>1</sup> )
 
 
 
