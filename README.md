@@ -14,3 +14,4 @@ Creating and maintaining high-quality training data is essential for unlocking t
 
 # References
 1. [GLAD paper](https://proceedings.neurips.cc/paper_files/paper/2009/file/f899139df5e1059396431415e770c6dd-Paper.pdf)
+2. [GLAD implementation])(https://github.com/notani/python-glad/blob/master/glad.py#L58)
