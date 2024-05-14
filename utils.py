@@ -520,6 +520,8 @@ class Evaluate():
 
         if strategy == "majority":
             agg = Aggregate()._get_majority_vote(generated_labels)
+        elif strategy == "glad":
+            agg = Aggregate()._glad(generated_labels)
         
         m = self.__element_wise_comparison(generated_labels, agg)
         self.logger.info(f"Evaluation complete.")
