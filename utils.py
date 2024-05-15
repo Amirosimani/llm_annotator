@@ -166,15 +166,15 @@ class Annotate:
         self.logger.info(f"Claude response received.")  # Info log
         return(Annotate.__extract_binary_values(responses.content[0].text))
 
-
-
-    async def classification(self, prompts: List[str], model: str) ->  List[Any]:
+    async def classification(self, prompts: List[str], models: List[str], valid_models=VALID_MODELS) ->  List[Any]:
         f"""
-        Performs text classification annotation using Gemini.
+        Performs text classification labeling
 
         Args:
             prompts: A list of text prompts to classify.
-            model: The name of the model to use for classification ({VALID_MODELS} are currently supported).
+            models: The name of the model to use for classification ({valid_models} are currently supported).
+            valid_models: A list of valid model names.
+
 
         Returns:
             A list of classification results (the format depends on the model used).
@@ -182,23 +182,35 @@ class Annotate:
         Raises:
             ValueError: If an unsupported model is specified.
         """
-        if model not in VALID_MODELS:
-            self.logger.error(f"Unsupported model: {model}")
-            raise ValueError(f"Unsupported model: {VALID_MODELS} - has to be one ")
-        elif model == "gemini":
-            generate_func = self.__gemini
-        elif model == "claude":
-            generate_func = self.__claude
 
-        
+        if not all(model in valid_models for model in models):
+            self.logger.error(f"Unsupported model: {set(models) - set(valid_models)}")
+            raise ValueError(f"Unsupported models in valid_models. Please use models from {valid_models}")
 
-        tasks = []
-        for q in prompts:
-            tasks.append(asyncio.create_task(generate_func(q)))
-        
-        results = await asyncio.gather(*tasks) # the order of result values is preserved, but the execution order is not. https://docs.python.org/3/library/asyncio-task.html#running-tasks-concurrently
-        self.logger.debug(f"Classification results: {results}")  # Debug log for results
-        return results
+
+        generate_methods = [self.__claude, self.__gemini]
+        all_tasks = {
+        "gemini": [],
+        "claude": []
+            }
+
+        for i, q in enumerate(prompts):
+            all_tasks["gemini"].append(asyncio.create_task(generate_methods[0](q)))
+            all_tasks["claude"].append(asyncio.create_task(generate_methods[1](q)))
+        for method_name, tasks in all_tasks.items():
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    self.logger.error(f"{method_name} Task {i} failed: {result}")
+                else:
+                    all_tasks[method_name][i] = result
+            self.logger.debug(f"Classification results: {all_tasks}")  # Debug log for results
+
+        return all_tasks
+
+
+
         
 class Aggregate():
 
