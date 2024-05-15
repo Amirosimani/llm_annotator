@@ -6,6 +6,7 @@ import scipy as sp
 from collections import Counter
 from itertools import combinations
 from asynciolimiter import Limiter
+from tqdm.asyncio import tqdm_asyncio
 from typing import Any, Dict, List, Optional
 
 
@@ -15,26 +16,8 @@ import vertexai.preview.generative_models as generative_models
 
 from anthropic import AnthropicVertex
 
+from config import VALID_MODELS, GEMINI_CONFIG, CLAUDE_CONFIG, VERBOSE
 
-
-VALID_MODELS = ["gemini", "claude"]
-
-
-GEMINI_CONFIG = {"project_config": {"qpm":5,
-                                    "project": "amir-genai-bb",
-                                    "location": "us-central1"},
-                "generation_config": {"max_output_tokens": 2048,
-                                      "temperature": 0.1,
-                                      "top_p": 1,
-                                      }
-}
-
-CLAUDE_CONFIG = {"project_config": {"qpm":60,  # https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude
-                                    "project": "cloud-llm-preview1",
-                                    "location": "us-central1"},
-                "generation_config": ""
-
-}
 
 def init_logger():
     global logger
@@ -43,9 +26,10 @@ def init_logger():
     log_fmt = '%(asctime)s/%(name)s[%(levelname)s]: %(message)s'
     logging.basicConfig(format=log_fmt)
 
+init_logger()
 
 class Annotate:
-    def __init__(self, gemini_config= GEMINI_CONFIG, claude_config=CLAUDE_CONFIG, verbose=False):
+    def __init__(self, gemini_config=GEMINI_CONFIG, claude_config=CLAUDE_CONFIG, verbose=VERBOSE):
 
         self.gemini_config = gemini_config
         self.claude_config = claude_config
@@ -122,7 +106,7 @@ class Annotate:
             self.logger.error(f"Error in __gemini: {e}") 
             raise
         self.logger.info(f"Gemini response received.")  # Info log
-        return(Annotate.__extract_binary_values(responses.text))
+        return(self.__extract_binary_values(responses.text))
 
 
     async def __claude(self, prompt:str) -> List:
@@ -164,7 +148,7 @@ class Annotate:
             self.logger.error(f"Error in __claude: {e}")
             raise
         self.logger.info(f"Claude response received.")  # Info log
-        return(Annotate.__extract_binary_values(responses.content[0].text))
+        return(self.__extract_binary_values(responses.content[0].text))
 
     async def classification(self, prompts: List[str], models: List[str], valid_models=VALID_MODELS) ->  List[Any]:
         f"""
@@ -197,19 +181,26 @@ class Annotate:
         generate_methods = [model_to_method[model] for model in models]
         all_tasks = {model: [] for model in models}
 
-        for i, q in enumerate(prompts):
-            all_tasks["gemini"].append(asyncio.create_task(generate_methods[0](q)))
-            all_tasks["claude"].append(asyncio.create_task(generate_methods[1](q)))
-            
-        for method_name, tasks in all_tasks.items():
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Progress bar for creating tasks
+        total_tasks = len(prompts) * len(models)
+        with tqdm_asyncio(total=total_tasks, desc="Creating tasks") as pbar:  # Use tqdm_asyncio for progress bar
+            for i, q in enumerate(prompts):
+                all_tasks["gemini"].append(asyncio.create_task(generate_methods[0](q)))
+                all_tasks["claude"].append(asyncio.create_task(generate_methods[1](q)))
+                pbar.update(2)  # Update progress bar for both tasks
 
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    self.logger.error(f"{method_name} Task {i} failed: {result}")
-                else:
-                    all_tasks[method_name][i] = result
-            self.logger.debug(f"Classification results: {all_tasks}")  # Debug log for results
+        for method_name, tasks in all_tasks.items():
+            with tqdm_asyncio(total=len(tasks), desc=f"Gathering {method_name} results") as pbar:  # Progress bar for gathering results
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        self.logger.error(f"{method_name} Task {i} failed: {result}")
+                        all_tasks[method_name][i] = None  # Store None for failed tasks
+                    else:
+                        all_tasks[method_name][i] = result
+                    pbar.update(1)  # Update the progress bar
+                self.logger.debug(f"Classification results for {method_name}: {all_tasks[method_name]}")
 
         return all_tasks
 
@@ -240,7 +231,7 @@ class Aggregate():
             majority_values.append(most_common_element[0])
         return majority_values
     
-    def _glad(self, list_of_labels: List[List[int]], verbose=False) -> List[int]:
+    def _glad(self, list_of_labels: List[List[int]], verbose=VERBOSE) -> List[int]:
 
         THRESHOLD = 1e-5
 
@@ -356,7 +347,7 @@ class Aggregate():
             initial_params = packX(data)
             params = sp.optimize.minimize(fun=f, x0=initial_params, args=(data,), method='CG',
                                         jac=df, tol=0.01,
-                                        options={'maxiter': 25, 'disp': verbose})
+                                        options={'maxiter': 25, 'disp': VERBOSE})
             unpackX(params.x, data)
 
 
@@ -473,7 +464,7 @@ class Aggregate():
 
 class Evaluate():
 
-    def __init__(self,verbose=False):
+    def __init__(self,verbose=VERBOSE):
 
          # Initialize logger with the desired level based on verbose setting
         self.logger = logging.getLogger('Annotate')
@@ -558,7 +549,7 @@ class Evaluate():
 
 
 if __name__ == "__main__":
-    ann = Annotate(verbose=True)
+    ann = Annotate(verbose=VERBOSE)
     import time
     s = time.perf_counter()
     prompts = ["where is paris?", "whare is tehran"]
