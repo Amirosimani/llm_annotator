@@ -188,15 +188,19 @@ class Annotate:
             raise ValueError(f"Unsupported models in valid_models. Please use models from {valid_models}")
 
 
-        generate_methods = [self.__claude, self.__gemini]
-        all_tasks = {
-        "gemini": [],
-        "claude": []
-            }
+        model_to_method = {
+            "claude": self.__claude,
+            "gemini": self.__gemini,
+            # Add more mappings as needed for other models
+        }
+
+        generate_methods = [model_to_method[model] for model in models]
+        all_tasks = {model: [] for model in models}
 
         for i, q in enumerate(prompts):
             all_tasks["gemini"].append(asyncio.create_task(generate_methods[0](q)))
             all_tasks["claude"].append(asyncio.create_task(generate_methods[1](q)))
+            
         for method_name, tasks in all_tasks.items():
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
