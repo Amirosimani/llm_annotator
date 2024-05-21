@@ -2,6 +2,7 @@ accelerate==0.30.0
 anthropic[vertex]==0.25.8
 asyncio==3.4.3
 asynciolimiter==1.0.0
+bitsandbytes>=0.39.0
 google-cloud-aiplatform==1.48.0
 numpy==1.26.4
 scikit-learn==1.4.2
