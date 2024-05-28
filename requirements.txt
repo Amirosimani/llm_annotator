@@ -2,11 +2,13 @@ accelerate==0.30.0
 anthropic[vertex]==0.25.8
 asyncio==3.4.3
 asynciolimiter==1.0.0
+bitsandbytes>=0.39.0
 google-cloud-aiplatform==1.48.0
 numpy==1.26.4
 scikit-learn==1.4.2
 scipy==1.13.0
 seaborn==0.13.2
 torch==2.3.0
+SentencePiece==0.2.0
 transformers==4.40.0
 datasets==2.19.1

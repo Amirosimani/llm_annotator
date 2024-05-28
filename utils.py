@@ -11,12 +11,9 @@ from typing import Any, Dict, List, Optional
 
 
 import vertexai
-from vertexai.generative_models import GenerativeModel
-import vertexai.preview.generative_models as generative_models
 
-from anthropic import AnthropicVertex
 
-from config import VALID_MODELS, GEMINI_CONFIG, CLAUDE_CONFIG, VERBOSE
+from config import VALID_MODELS, GEMINI_CONFIG, CLAUDE_CONFIG, PALM_CONFIG, VERBOSE
 
 
 def init_logger():
@@ -28,11 +25,14 @@ def init_logger():
 
 init_logger()
 
+
 class Annotate:
-    def __init__(self, gemini_config=GEMINI_CONFIG, claude_config=CLAUDE_CONFIG, verbose=VERBOSE):
+    def __init__(self, gemini_config=GEMINI_CONFIG, claude_config=CLAUDE_CONFIG, palm_config=PALM_CONFIG, verbose=VERBOSE):
 
         self.gemini_config = gemini_config
         self.claude_config = claude_config
+        self.palm_config = palm_config
+
 
          # Initialize logger with the desired level based on verbose setting
         self.logger = logging.getLogger('Annotate')
@@ -75,7 +75,9 @@ class Annotate:
             Any exceptions raised by the `Annotate.__extract_binary_values` function.
         """
 
-        
+        from vertexai.generative_models import GenerativeModel
+        import vertexai.preview.generative_models as generative_models
+
         vertexai.init(project=self.gemini_config["project_config"]["project"], 
                       location=self.gemini_config["project_config"]["location"])
 
@@ -86,9 +88,9 @@ class Annotate:
             generative_models.HarmCategory.HARM_CATEGORY_HARASSMENT: generative_models.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
         }
 
-        rate_limiter = Limiter(self.gemini_config["project_config"]["qpm"]/60) # Limit to 5 requests per 60 second
-        model = GenerativeModel("gemini-1.0-pro-002",
-                            system_instruction=[
+        rate_limiter = Limiter(self.gemini_config["project_config"]["qpm"]/60) # Limit to 300 requests per 60 second
+        model = GenerativeModel(self.gemini_config["model"],
+                                system_instruction=[
                                 "You are a helpful data labeler.",
                                 "Your mission is to label the input data based on the instruction you will receive.",
                                 ],
@@ -108,6 +110,46 @@ class Annotate:
         self.logger.info(f"Gemini response received.")  # Info log
         return(self.__extract_binary_values(responses.text))
 
+    
+    async def __palm(self, prompt:str) -> List:
+        """
+        Asynchronously generates labels for datapoints using Bison model 
+        dataset order is presevered. safety measures are in place.
+
+        Args:
+            prompt: The text input to be classified.
+
+        Returns:
+            A boolean value representing the model's classification.
+
+
+        Raises:
+            VertexAIError: If there's an issue with the Vertex AI initialization or model call.
+            RateLimitExceededError: If the rate limiter indicates excessive API calls.
+            Any exceptions raised by the `Annotate.__extract_binary_values` function.
+        """
+
+        from vertexai.language_models import TextGenerationModel
+
+        vertexai.init(project=self.palm_config["project_config"]["project"], 
+                      location=self.palm_config["project_config"]["location"])
+
+
+        rate_limiter = Limiter(self.palm_config["project_config"]["qpm"]/60) # Limit to 300 requests per 60 second
+        model = TextGenerationModel.from_pretrained(self.palm_config["model"])
+        await rate_limiter.wait()
+        try:
+            self.logger.debug(f"Sending prompt to PaLM: {prompt}")    
+            responses = model.predcit(
+                prompt,
+                **self.palm_config["generation_config"]
+                )
+        except Exception as e:
+            self.logger.error(f"Error in __palm: {e}") 
+            raise
+        self.logger.info(f"palm response received.")  # Info log
+        return(self.__extract_binary_values(responses.text))
+    
 
     async def __claude(self, prompt:str) -> List:
         """
@@ -126,6 +168,8 @@ class Annotate:
             RateLimitExceededError: If the rate limiter indicates excessive API calls.
             Any exceptions raised by the `Annotate.__extract_binary_values` function.
         """
+        from anthropic import AnthropicVertex
+
         client = AnthropicVertex(region=self.claude_config["project_config"]["location"], 
                                  project_id=self.claude_config["project_config"]["project"])
 
@@ -142,7 +186,7 @@ class Annotate:
                     "content": prompt,
                     }
                     ],
-                    model="claude-3-haiku@20240307",
+                    model=self.claude_config["model"],
                     )
         except Exception as e:
             self.logger.error(f"Error in __claude: {e}")
@@ -175,6 +219,7 @@ class Annotate:
         model_to_method = {
             "claude": self.__claude,
             "gemini": self.__gemini,
+            "palm": self.__palm
             # Add more mappings as needed for other models
         }
 
@@ -185,9 +230,11 @@ class Annotate:
         total_tasks = len(prompts) * len(models)
         with tqdm_asyncio(total=total_tasks, desc="Creating tasks") as pbar:  # Use tqdm_asyncio for progress bar
             for i, q in enumerate(prompts):
-                all_tasks["gemini"].append(asyncio.create_task(generate_methods[0](q)))
-                all_tasks["claude"].append(asyncio.create_task(generate_methods[1](q)))
-                pbar.update(2)  # Update progress bar for both tasks
+            # Dynamically select the correct method based on the model
+                for m in models:
+                    generate_method = generate_methods[models.index(m)]
+                    all_tasks[m].append(asyncio.create_task(generate_method(q)))
+                    pbar.update(2)  # Update progress bar for both tasks
 
         for method_name, tasks in all_tasks.items():
             with tqdm_asyncio(total=len(tasks), desc=f"Gathering {method_name} results") as pbar:  # Progress bar for gathering results
