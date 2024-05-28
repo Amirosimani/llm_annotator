@@ -108,7 +108,9 @@ class Annotate:
             self.logger.error(f"Error in __gemini: {e}") 
             raise
         self.logger.info(f"Gemini response received.")  # Info log
-        return(self.__extract_binary_values(responses.text))
+        # return(self.__extract_binary_values(responses.text))
+        return(responses.text)
+
 
     
     async def __palm(self, prompt:str) -> List:
@@ -148,7 +150,9 @@ class Annotate:
             self.logger.error(f"Error in __palm: {e}") 
             raise
         self.logger.info(f"palm response received.")  # Info log
-        return(self.__extract_binary_values(responses.text))
+        # return(self.__extract_binary_values(responses.text))
+        return(responses.text)
+
     
 
     async def __claude(self, prompt:str) -> List:
@@ -192,7 +196,8 @@ class Annotate:
             self.logger.error(f"Error in __claude: {e}")
             raise
         self.logger.info(f"Claude response received.")  # Info log
-        return(self.__extract_binary_values(responses.content[0].text))
+        # return(self.__extract_binary_values(responses.content[0].text))
+        return(responses.text)
 
     async def classification(self, prompts: List[str], models: List[str], valid_models=VALID_MODELS) ->  List[Any]:
         f"""
