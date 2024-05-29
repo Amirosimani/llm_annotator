@@ -10,35 +10,61 @@ from tqdm.asyncio import tqdm_asyncio
 from typing import Any, Dict, List, Optional
 
 import vertexai
-from config import PALM_CONFIG
+from config import CLAUDE_CONFIG
+
+# async def claude(prompt:str, claude_config: dict) -> List:
+
+#     from anthropic import AnthropicVertex
+#     print(claude_config)
+
+#     client = AnthropicVertex(region=claude_config["project_config"]["location"], 
+#                                 project_id=claude_config["project_config"]["project"])
 
 
-async def palm(prompt:str, palm_config=PALM_CONFIG) -> List:
+#     rate_limiter = Limiter(claude_config["project_config"]["qpm"]/60) # Limit to 60 requests per 60 second
 
-    from vertexai.language_models import TextGenerationModel
+#     await rate_limiter.wait()
+#     try:
+#         responses = client.messages.create(
+#             max_tokens=1024,
+#             messages=[
+#                 {"role": "user",
+#                 "content": prompt,
+#                 }
+#                 ],
+#                 model=claude_config["model"],
+#                 )
+#     except Exception as e:
+#         raise
+#     return(responses.content)
 
-    vertexai.init(project=palm_config["project_config"]["project"], 
-                    location=palm_config["project_config"]["location"])
 
+def claude(prompt:str):
 
-    rate_limiter = Limiter(palm_config["project_config"]["qpm"]/60) # Limit to 300 requests per 60 second
-    model = TextGenerationModel.from_pretrained(palm_config["model"])
-    await rate_limiter.wait()
-    try:
-        responses = model.predcit(
-            prompt,
-            **palm_config["generation_config"]
-            )
-    except Exception as e:
-        print(f"Error in __palm: {e}") 
-        raise
-    return(responses.text)
+    from anthropic import AnthropicVertex
 
-# Define an async function to call the palm method
-async def get_palm_response(prompt):
-    responses = await palm(prompt)
-    print(responses)
+    MODEL = "claude-3-haiku@20240307"
 
-if __name__ == "__main__":
+    client = AnthropicVertex(region="us-central1", project_id="amir-genai-bb")
 
-    asyncio.run(get_palm_response("Your prompt here"))
+    message = client.messages.create(
+        max_tokengits=1024,
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        model=MODEL,
+    )
+    print(message.model_dump_json(indent=2))
+
+# # Define an async function to call the palm method
+# async def get_palm_response(prompt, claude_config):
+#     responses = await claude(prompt, claude_config)
+#     print(responses)
+
+# if __name__ == "__main__":
+
+    # asyncio.run(get_palm_response("Your prompt here", CLAUDE_CONFIG))
+claude("give me a banana bread recipe")

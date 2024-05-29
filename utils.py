@@ -87,10 +87,8 @@ class Annotate:
             raise
         self.logger.info(f"Gemini response received.")  # Info log
         return(responses.text)
-
-
     
-    async def __palm(self, prompt:str, palm_config) -> List:
+    async def __palm(self, prompt:str, palm_config: dict) -> List:
         """
         Asynchronously generates labels for datapoints using Bison model 
         dataset order is presevered. safety measures are in place.
@@ -129,6 +127,48 @@ class Annotate:
         self.logger.info(f"palm response received.")  # Info log
         return(responses.text)
     
+    async def __claude(self, prompt:str, claude_config: dict) -> List:
+        """
+        Asynchronously generates labels for datapoints using Claude Haiku 
+        dataset order is presevered.
+
+        Args:
+            prompt: The text input to be classified.
+
+        Returns:
+            A boolean value representing the model's classification.
+
+
+        Raises:
+            VertexAIError: If there's an issue with the Vertex AI initialization or model call.
+            RateLimitExceededError: If the rate limiter indicates excessive API calls.
+            Any exceptions raised by the `Annotate.__extract_binary_values` function.
+        """
+        from anthropic import AnthropicVertex
+
+        client = AnthropicVertex(region=claude_config["project_config"]["location"], 
+                                 project_id=claude_config["project_config"]["project"])
+
+
+        rate_limiter = Limiter(claude_config["project_config"]["qpm"]/60) # Limit to 60 requests per 60 second
+
+        await rate_limiter.wait()
+        try:
+            self.logger.debug(f"Sending prompt to Claude: {prompt}")
+            responses = client.messages.create(
+                max_tokens=1024,
+                messages=[
+                    {"role": "user",
+                    "content": prompt,
+                    }
+                    ],
+                    model=claude_config["model"],
+                    )
+        except Exception as e:
+            self.logger.error(f"Error in __claude: {e}")
+            raise
+        self.logger.info(f"Claude response received.")  # Info log
+        return(responses.content[0].text)
 
     async def classification(self, prompts: List[str], models: List[str], model_configs,
                              valid_models=VALID_MODELS) -> List[Any]:
