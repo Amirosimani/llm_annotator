@@ -3,6 +3,7 @@ import logging
 import asyncio
 import numpy as np
 import scipy as sp
+from datetime import datetime
 from collections import Counter
 from itertools import combinations
 from asynciolimiter import Limiter
@@ -229,10 +230,7 @@ def convert_dict_to_indexed_list(data_dict):
 
 def load_data(sample_data, task_config):
     data = Dataset()
-
     result = convert_dict_to_indexed_list(sample_data)
-
-     # Read parameters
     data.numLabels = task_config[0]
     data.numLabelers = task_config[1]
     data.numTasks = task_config[2]
@@ -240,26 +238,16 @@ def load_data(sample_data, task_config):
     data.priorZ = np.array([float(x) for x in task_config[4:]])
     assert len(data.priorZ) == data.numClasses, 'Incorrect input header'
     assert data.priorZ.sum() == 1, 'Incorrect priorZ given'
-    if verbose:
-        logger.info('Reading {} labels of {} labelers over {} tasks for prior P(Z) = {}'.format(data.numLabels,
-                                                                                                data.numLabelers,
-                                                                                                data.numTasks,
-                                                                                                data.priorZ))
-    # Read Labels
     data.labels = np.zeros((data.numTasks, data.numLabelers))
     for line in result:
         task, labeler, label = map(int, line)
-        if debug:
-            logger.info("Read: task({})={} by labeler {}".format(task, label, labeler))
-        data.labels[task][labeler] = label + 1
-    # Initialize Probs
+        if task < data.numTasks and labeler < data.numLabelers:
+            data.labels[task][labeler] = label + 1
     data.priorAlpha = np.ones(data.numLabelers)
     data.priorBeta = np.ones(data.numTasks)
     data.probZ = np.empty((data.numTasks, data.numClasses))
-    # data.priorZ = (np.zeros((data.numClasses, data.numTasks)).T + data.priorZ).T
     data.beta = np.empty(data.numTasks)
     data.alpha = np.empty(data.numLabelers)
-
     return data
 
 def init_logger():
@@ -516,7 +504,7 @@ def gradientQ(data):
     return dQdAlpha, dQdBeta
 
 
-def output(data):
+def output(data, save=True):
         results = {}
         # Alpha (worker abilities)
         results['alpha'] = {i: data.alpha[i] for i in range(data.numLabelers)}
@@ -529,14 +517,29 @@ def output(data):
         # Predicted Labels
         results['labels'] = {j: np.argmax(data.probZ[j]) for j in range(data.numTasks)}
 
+        if save:
+            now = datetime.now().strftime("%Y%m%d")
+            alpha = np.c_[np.arange(data.numLabelers), data.alpha]
+            np.savetxt(f'data/alpha__{now}.csv', alpha, fmt=['%d', '%.5f'], delimiter=',', header='id,alpha')
+            beta = np.c_[np.arange(data.numTasks), np.exp(data.beta)]
+            np.savetxt('data/beta__{now}.csv', beta, fmt=['%d', '%.5f'], delimiter=',', header='id,beta')
+            probZ = np.c_[np.arange(data.numTasks), data.probZ]
+            np.savetxt(fname='data/probZ__{now}.csv',
+                    X=probZ,
+                    fmt=['%d'] + (['%.5f'] * data.numClasses),
+                    delimiter=',',
+                    header='id,' + ','.join(['z' + str(k) for k in range(data.numClasses)]))
+            label = np.c_[np.arange(data.numTasks), np.argmax(data.probZ, axis=1)]
+            np.savetxt('data/label_glad__{now}.csv', label, fmt=['%d', '%d'], delimiter=',', header='id,label')
+
         return results
+
 
 def glad(data, task_config):
     data = load_data(data, task_config)
     EM(data)
 
     return output(data)
-
 
 
 
