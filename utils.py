@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 import vertexai
 
 
-from config import VALID_MODELS, GEMINI_CONFIG, CLAUDE_CONFIG, PALM_CONFIG, VERBOSE
+from config import VALID_MODELS, GEMINI_CONFIG, PALM_CONFIG, VERBOSE
 
 
 def init_logger():
@@ -27,19 +27,14 @@ init_logger()
 
 
 class Annotate:
-    def __init__(self, gemini_config=GEMINI_CONFIG, claude_config=CLAUDE_CONFIG, palm_config=PALM_CONFIG, verbose=VERBOSE):
-
-        self.gemini_config = gemini_config
-        self.claude_config = claude_config
-        self.palm_config = palm_config
-
+    def __init__(self, verbose=VERBOSE):
 
          # Initialize logger with the desired level based on verbose setting
         self.logger = logging.getLogger('Annotate')
         self.logger.setLevel(logging.DEBUG if verbose else logging.ERROR)  
 
 
-    async def __gemini(self, prompt:str) -> List:
+    async def __gemini(self, prompt:str, gemini_config: dict) -> List:
         """
         Asynchronously generates labels for datapoints using a Gemini Pro text 
         dataset order is presevered. safety measures are in place.
@@ -60,8 +55,8 @@ class Annotate:
         from vertexai.generative_models import GenerativeModel
         import vertexai.preview.generative_models as generative_models
 
-        vertexai.init(project=self.gemini_config["project_config"]["project"], 
-                      location=self.gemini_config["project_config"]["location"])
+        vertexai.init(project=gemini_config["project_config"]["project"], 
+                      location=gemini_config["project_config"]["location"])
 
         safety_settings = {
             generative_models.HarmCategory.HARM_CATEGORY_HATE_SPEECH: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
@@ -70,8 +65,8 @@ class Annotate:
             generative_models.HarmCategory.HARM_CATEGORY_HARASSMENT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
         }
 
-        rate_limiter = Limiter(self.gemini_config["project_config"]["qpm"]/60) # Limit to 300 requests per 60 second
-        model = GenerativeModel(self.gemini_config["model"],
+        rate_limiter = Limiter(gemini_config["project_config"]["qpm"]/60) # Limit to 300 requests per 60 second
+        model = GenerativeModel(gemini_config["model"],
                                 system_instruction=[
                                 "You are a helpful data labeler.",
                                 "Your mission is to label the input data based on the instruction you will receive.",
@@ -82,7 +77,7 @@ class Annotate:
             self.logger.debug(f"Sending prompt to Gemini: {prompt}")    
             responses = model.generate_content(
                 [prompt],
-                generation_config=self.gemini_config["generation_config"],
+                generation_config=gemini_config["generation_config"],
                 safety_settings=safety_settings,
                 stream=False,
                 )
@@ -94,7 +89,7 @@ class Annotate:
 
 
     
-    async def __palm(self, prompt:str) -> List:
+    async def __palm(self, prompt:str, palm_config) -> List:
         """
         Asynchronously generates labels for datapoints using Bison model 
         dataset order is presevered. safety measures are in place.
@@ -114,18 +109,18 @@ class Annotate:
 
         from vertexai.language_models import TextGenerationModel
 
-        vertexai.init(project=self.palm_config["project_config"]["project"], 
-                      location=self.palm_config["project_config"]["location"])
+        vertexai.init(project=palm_config["project_config"]["project"], 
+                      location=palm_config["project_config"]["location"])
 
 
-        rate_limiter = Limiter(self.palm_config["project_config"]["qpm"]/60) # Limit to 300 requests per 60 second
-        model = TextGenerationModel.from_pretrained(self.palm_config["model"])
+        rate_limiter = Limiter(palm_config["project_config"]["qpm"]/60) # Limit to 300 requests per 60 second
+        model = TextGenerationModel.from_pretrained(palm_config["model"])
         await rate_limiter.wait()
         try:
             self.logger.debug(f"Sending prompt to PaLM: {prompt}")    
             responses = model.predict(
                 prompt,
-                **self.palm_config["generation_config"]
+                **palm_config["generation_config"]
                 )
         except Exception as e:
             self.logger.error(f"Error in __palm: {e}") 
@@ -134,33 +129,35 @@ class Annotate:
         return(responses.text)
     
 
-    async def classification(self, prompts: List[str], models: List[str], valid_models=VALID_MODELS) ->  List[Any]:
-        f"""
-        Performs text classification labeling
+    async def classification(self, prompts: List[str], models: List[str], model_configs,
+                             valid_models=VALID_MODELS) -> List[Any]:
+        """Performs text classification labeling.
 
         Args:
             prompts: A list of text prompts to classify.
-            models: The name of the model to use for classification ({valid_models} are currently supported).
+            models: The names of the models to use for classification.
             valid_models: A list of valid model names.
-
+            gemini_config: (Optional) Gemini configuration if "gemini" is in `models`.
+            palm_config: (Optional) PaLM configuration if "palm" is in `models`.
 
         Returns:
-            A list of classification results (the format depends on the model used).
+            A list of classification results for each model (None for failed tasks).
 
         Raises:
-            ValueError: If an unsupported model is specified.
+            ValueError: If an unsupported model or missing configuration is specified.
         """
-
         if not all(model in valid_models for model in models):
             self.logger.error(f"Unsupported model: {set(models) - set(valid_models)}")
             raise ValueError(f"Unsupported models in valid_models. Please use models from {valid_models}")
 
 
+
         model_to_method = {
-            "gemini": self.__gemini,
-            "palm": self.__palm
-            # Add more mappings as needed for other models
+            "gemini": lambda q: self.__gemini(q, model_configs["gemini"]),
+            "palm": lambda q: self.__palm(q, model_configs["palm"]),
+            # ... (Add other model mappings as needed)
         }
+
 
         generate_methods = [model_to_method[model] for model in models]
         all_tasks = {model: [] for model in models}
