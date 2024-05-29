@@ -522,15 +522,15 @@ def output(data, save=True):
             alpha = np.c_[np.arange(data.numLabelers), data.alpha]
             np.savetxt(f'data/alpha__{now}.csv', alpha, fmt=['%d', '%.5f'], delimiter=',', header='id,alpha')
             beta = np.c_[np.arange(data.numTasks), np.exp(data.beta)]
-            np.savetxt('data/beta__{now}.csv', beta, fmt=['%d', '%.5f'], delimiter=',', header='id,beta')
+            np.savetxt(f'data/beta__{now}.csv', beta, fmt=['%d', '%.5f'], delimiter=',', header='id,beta')
             probZ = np.c_[np.arange(data.numTasks), data.probZ]
-            np.savetxt(fname='data/probZ__{now}.csv',
+            np.savetxt(fname=f'data/probZ__{now}.csv',
                     X=probZ,
                     fmt=['%d'] + (['%.5f'] * data.numClasses),
                     delimiter=',',
                     header='id,' + ','.join(['z' + str(k) for k in range(data.numClasses)]))
             label = np.c_[np.arange(data.numTasks), np.argmax(data.probZ, axis=1)]
-            np.savetxt('data/label_glad__{now}.csv', label, fmt=['%d', '%d'], delimiter=',', header='id,label')
+            np.savetxt(f'data/label_glad__{now}.csv', label, fmt=['%d', '%d'], delimiter=',', header='id,label')
 
         return results
 
