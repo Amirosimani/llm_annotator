@@ -38,24 +38,6 @@ class Annotate:
         self.logger = logging.getLogger('Annotate')
         self.logger.setLevel(logging.DEBUG if verbose else logging.ERROR)  
 
-    @staticmethod
-    def __extract_binary_values(response_text: str) -> Optional[int]:
-        """Extracts 0 or 1 values from a list of strings, prioritizing single digits.
-        Args:
-            string_list: A list of strings potentially containing 0s or 1s.
-        Returns:
-            A list of integers (0 or 1) extracted from the strings.
-        """
-
-        pattern = r"\b[01]\b"  # Matches standalone 0 or 1
-
-        match = re.search(pattern, response_text)
-        if match:
-            return int(match.group())  # Convert to integer
-        else:
-            print("Response format is not correct")
-            return None
-
 
     async def __gemini(self, prompt:str) -> List:
         """
@@ -108,7 +90,6 @@ class Annotate:
             self.logger.error(f"Error in __gemini: {e}") 
             raise
         self.logger.info(f"Gemini response received.")  # Info log
-        # return(self.__extract_binary_values(responses.text))
         return(responses.text)
 
 
@@ -150,54 +131,8 @@ class Annotate:
             self.logger.error(f"Error in __palm: {e}") 
             raise
         self.logger.info(f"palm response received.")  # Info log
-        # return(self.__extract_binary_values(responses.text))
         return(responses.text)
-
     
-
-    async def __claude(self, prompt:str) -> List:
-        """
-        Asynchronously generates labels for datapoints using Claude Haiku 
-        dataset order is presevered.
-
-        Args:
-            prompt: The text input to be classified.
-
-        Returns:
-            A boolean value representing the model's classification.
-
-
-        Raises:
-            VertexAIError: If there's an issue with the Vertex AI initialization or model call.
-            RateLimitExceededError: If the rate limiter indicates excessive API calls.
-            Any exceptions raised by the `Annotate.__extract_binary_values` function.
-        """
-        from anthropic import AnthropicVertex
-
-        client = AnthropicVertex(region=self.claude_config["project_config"]["location"], 
-                                 project_id=self.claude_config["project_config"]["project"])
-
-
-        rate_limiter = Limiter(self.claude_config["project_config"]["qpm"]/60) # Limit to 60 requests per 60 second
-
-        await rate_limiter.wait()
-        try:
-            self.logger.debug(f"Sending prompt to Claude: {prompt}")
-            responses = client.messages.create(
-                max_tokens=1024,
-                messages=[
-                    {"role": "user",
-                    "content": prompt,
-                    }
-                    ],
-                    model=self.claude_config["model"],
-                    )
-        except Exception as e:
-            self.logger.error(f"Error in __claude: {e}")
-            raise
-        self.logger.info(f"Claude response received.")  # Info log
-        # return(self.__extract_binary_values(responses.content[0].text))
-        return(responses.text)
 
     async def classification(self, prompts: List[str], models: List[str], valid_models=VALID_MODELS) ->  List[Any]:
         f"""
@@ -222,7 +157,6 @@ class Annotate:
 
 
         model_to_method = {
-            "claude": self.__claude,
             "gemini": self.__gemini,
             "palm": self.__palm
             # Add more mappings as needed for other models
