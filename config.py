@@ -3,6 +3,7 @@ VALID_MODELS = ["gemini", "claude", "palm"]
 VERBOSE=False
 
 GEMINI_CONFIG = {
+    "config_name": "default",
     "model": "gemini-1.0-pro-002",
     "project_config": {
         "qpm": 300,
@@ -17,6 +18,7 @@ GEMINI_CONFIG = {
 }
 
 PALM_CONFIG = {
+    "config_name": "default",
     "model": "text-bison",
     "project_config": {
         "qpm": 300,
@@ -32,6 +34,7 @@ PALM_CONFIG = {
 }
 
 CLAUDE_CONFIG = {
+    "config_name": "default",
     "model":"claude-3-haiku@20240307",
     "project_config": {
         "qpm": 60,  # Adjust as needed

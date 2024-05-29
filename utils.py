@@ -59,10 +59,10 @@ class Annotate:
                       location=gemini_config["project_config"]["location"])
 
         safety_settings = {
-            generative_models.HarmCategory.HARM_CATEGORY_HATE_SPEECH: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            generative_models.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            generative_models.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            generative_models.HarmCategory.HARM_CATEGORY_HARASSMENT: generative_models.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+            generative_models.HarmCategory.HARM_CATEGORY_HATE_SPEECH: generative_models.HarmBlockThreshold.BLOCK_NONE,
+            generative_models.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: generative_models.HarmBlockThreshold.BLOCK_NONE,
+            generative_models.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: generative_models.HarmBlockThreshold.BLOCK_NONE,
+            generative_models.HarmCategory.HARM_CATEGORY_HARASSMENT: generative_models.HarmBlockThreshold.BLOCK_NONE,
         }
 
         rate_limiter = Limiter(gemini_config["project_config"]["qpm"]/60) # Limit to 300 requests per 60 second
@@ -150,43 +150,41 @@ class Annotate:
             self.logger.error(f"Unsupported model: {set(models) - set(valid_models)}")
             raise ValueError(f"Unsupported models in valid_models. Please use models from {valid_models}")
 
+        # Create tasks for each model and config combination
+        all_tasks = {}
+        total_tasks = len(prompts) * sum(len(configs) for model, configs in model_configs.items() if model in models)
 
+        with tqdm_asyncio(total=total_tasks, desc="Creating tasks") as pbar:
+            for prompt in prompts:
+                for model in models:
+                    configs = model_configs[model] if isinstance(model_configs[model], list) else [model_configs[model]]
+                    for config in configs:
+                        task_key = f"{model}_{config['config_name']}"  # Assuming each config has a unique 'config_name' key
+                        if task_key not in all_tasks:
+                            all_tasks[task_key] = []
+                        if model == "gemini":
+                            all_tasks[task_key].append(asyncio.create_task(self.__gemini(prompt, config)))
+                        elif model == "palm":
+                            all_tasks[task_key].append(asyncio.create_task(self.__palm(prompt, config)))
+                        # Add other models here as needed
+                        pbar.update(1)  # Update progress bar for each created task
 
-        model_to_method = {
-            "gemini": lambda q: self.__gemini(q, model_configs["gemini"]),
-            "palm": lambda q: self.__palm(q, model_configs["palm"]),
-            # ... (Add other model mappings as needed)
-        }
+        # Collect results for each model
+        results = {}
+        for task_key, tasks in all_tasks.items():
+            with tqdm_asyncio(total=len(tasks), desc=f"Gathering {task_key} results") as pbar:
+                model_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-
-        generate_methods = [model_to_method[model] for model in models]
-        all_tasks = {model: [] for model in models}
-
-        # Progress bar for creating tasks
-        total_tasks = len(prompts) * len(models)
-        with tqdm_asyncio(total=total_tasks, desc="Creating tasks") as pbar:  # Use tqdm_asyncio for progress bar
-            for i, q in enumerate(prompts):
-            # Dynamically select the correct method based on the model
-                for m in models:
-                    generate_method = generate_methods[models.index(m)]
-                    all_tasks[m].append(asyncio.create_task(generate_method(q)))
-                    pbar.update(2)  # Update progress bar for both tasks
-
-        for method_name, tasks in all_tasks.items():
-            with tqdm_asyncio(total=len(tasks), desc=f"Gathering {method_name} results") as pbar:  # Progress bar for gathering results
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                for i, result in enumerate(results):
+                for i, result in enumerate(model_results):
                     if isinstance(result, Exception):
-                        self.logger.error(f"{method_name} Task {i} failed: {result}")
-                        all_tasks[method_name][i] = None  # Store None for failed tasks
-                    else:
-                        all_tasks[method_name][i] = result
+                        self.logger.error(f"{task_key} Task {i} failed: {result}")
+                        model_results[i] = None  # Store None for failed tasks
                     pbar.update(1)  # Update the progress bar
-                self.logger.debug(f"Classification results for {method_name}: {all_tasks[method_name]}")
 
-        return all_tasks
+                self.logger.debug(f"Classification results for {task_key}: {model_results}")
+                results[task_key] = model_results
 
+        return results
 
 
 
