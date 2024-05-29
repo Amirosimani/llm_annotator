@@ -1,20 +1,44 @@
+import re
+import logging
 import asyncio
+import numpy as np
+import scipy as sp
+from collections import Counter
+from itertools import combinations
+from asynciolimiter import Limiter
+from tqdm.asyncio import tqdm_asyncio
+from typing import Any, Dict, List, Optional
 
-async def fetch_data(url):
-    await asyncio.sleep(1)  # Simulate network request
-    return f"Data from {url}"
+import vertexai
+from config import PALM_CONFIG
 
-async def process_data(data):
-    await asyncio.sleep(1)  # Simulate processing
-    return data.upper()
 
-async def main():
-    urls = ["url1", "url2", "url3"]
-    tasks = [asyncio.create_task(fetch_data(url)) for url in urls]
+async def palm(prompt:str, palm_config=PALM_CONFIG) -> List:
 
-    for task in asyncio.as_completed(tasks):
-        data = await task
-        processed = await asyncio.create_task(process_data(data))
-        print(processed)
+    from vertexai.language_models import TextGenerationModel
 
-asyncio.run(main())
+    vertexai.init(project=palm_config["project_config"]["project"], 
+                    location=palm_config["project_config"]["location"])
+
+
+    rate_limiter = Limiter(palm_config["project_config"]["qpm"]/60) # Limit to 300 requests per 60 second
+    model = TextGenerationModel.from_pretrained(palm_config["model"])
+    await rate_limiter.wait()
+    try:
+        responses = model.predcit(
+            prompt,
+            **palm_config["generation_config"]
+            )
+    except Exception as e:
+        print(f"Error in __palm: {e}") 
+        raise
+    return(responses.text)
+
+# Define an async function to call the palm method
+async def get_palm_response(prompt):
+    responses = await palm(prompt)
+    print(responses)
+
+if __name__ == "__main__":
+
+    asyncio.run(get_palm_response("Your prompt here"))

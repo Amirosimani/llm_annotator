@@ -17,17 +17,18 @@ GEMINI_CONFIG = {
 }
 
 PALM_CONFIG = {
-    "model": "text-bison-32k@002",
+    "model": "text-bison",
     "project_config": {
         "qpm": 300,
         "project": "amir-genai-bb", 
         "location": "us-central1"
     },
     "generation_config": {
+        "candidate_count": 1,
         "max_output_tokens": 1024,
-        "temperature": 0.1,
-        "top_p": 1,
-    }
+        "temperature": 0.4,
+        "top_p": 1
+        }
 }
 
 CLAUDE_CONFIG = {
