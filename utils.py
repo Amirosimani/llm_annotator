@@ -226,29 +226,40 @@ def convert_dict_to_indexed_list(data_dict):
     return result
 
 
-
-
-def load_data(sample_data, task_config):
+def load_data(filename):
     data = Dataset()
-    result = convert_dict_to_indexed_list(sample_data)
-    data.numLabels = task_config[0]
-    data.numLabelers = task_config[1]
-    data.numTasks = task_config[2]
-    data.numClasses = task_config[3]
-    data.priorZ = np.array([float(x) for x in task_config[4:]])
-    assert len(data.priorZ) == data.numClasses, 'Incorrect input header'
-    assert data.priorZ.sum() == 1, 'Incorrect priorZ given'
-    data.labels = np.zeros((data.numTasks, data.numLabelers))
-    for line in result:
-        task, labeler, label = map(int, line)
-        if task < data.numTasks and labeler < data.numLabelers:
+    with open(filename) as f:
+        # Read parameters
+        header = f.readline().split()
+        data.numLabels = int(header[0])
+        data.numLabelers = int(header[1])
+        data.numTasks = int(header[2])
+        data.numClasses = int(header[3])
+        data.priorZ = np.array([float(x) for x in header[4:]])
+        assert len(data.priorZ) == data.numClasses, 'Incorrect input header'
+        assert data.priorZ.sum() == 1, 'Incorrect priorZ given'
+        if verbose:
+            logger.info('Reading {} labels of {} labelers over {} tasks for prior P(Z) = {}'.format(data.numLabels,
+                                                                                                    data.numLabelers,
+                                                                                                    data.numTasks,
+                                                                                                    data.priorZ))
+        # Read Labels
+        data.labels = np.zeros((data.numTasks, data.numLabelers))
+        for line in f:
+            task, labeler, label = map(int, line.split())
+            if debug:
+                logger.info("Read: task({})={} by labeler {}".format(task, label, labeler))
             data.labels[task][labeler] = label + 1
+    # Initialize Probs
     data.priorAlpha = np.ones(data.numLabelers)
     data.priorBeta = np.ones(data.numTasks)
     data.probZ = np.empty((data.numTasks, data.numClasses))
+    # data.priorZ = (np.zeros((data.numClasses, data.numTasks)).T + data.priorZ).T
     data.beta = np.empty(data.numTasks)
     data.alpha = np.empty(data.numLabelers)
+
     return data
+
 
 def init_logger():
     global logger
@@ -535,8 +546,9 @@ def output(data, save=True):
         return results
 
 
-def glad(data, task_config):
-    data = load_data(data, task_config)
+def glad(filename):
+    # data = load_data(data, task_config)
+    data = load_data(filename)
     EM(data)
 
     return output(data)

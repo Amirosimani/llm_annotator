@@ -12,7 +12,7 @@ GEMINI_CONFIG = {
     },
     "generation_config": {
         "max_output_tokens": 2048,
-        "temperature": 0.1,
+        "temperature": 0.4,
         "top_p": 1,
     }
 }
