@@ -4,9 +4,14 @@ import time
 import streamlit as st
 
 import pandas as pd
+from itertools import combinations
 from collections import Counter
 from typing import Dict, List
 from sklearn.metrics import accuracy_score
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 
 sys.path.insert(1, "/usr/local/google/home/amirimani/Desktop/projects/llm_annotator")
 from config import PALM_CONFIG, GEMINI_CONFIG
@@ -144,7 +149,29 @@ def accuracy_with_none_penalty(y_true, y_pred):
     return accuracy_score(filtered_y_true, filtered_y_pred)
 
 
-    
+
+def calculate_agreement_matrix(data_dict):
+    """Calculates agreement between lists in a dictionary for matching indices.
+
+    Args:
+        data_dict: A dictionary where keys are labels and values are lists of equal length.
+
+    Returns:
+        A Pandas DataFrame representing the agreement matrix.
+    """
+
+    df = pd.DataFrame(data_dict)
+    keys = df.columns
+
+    agreement_matrix = pd.DataFrame(index=keys, columns=keys)
+
+    for key1, key2 in combinations(keys, 2):  # Iterate over all key pairs
+        matches = (df[key1] == df[key2]).sum()  # Count matching values
+        total = len(df)  # Total number of values
+        agreement_matrix.loc[key1, key2] = agreement_matrix.loc[key2, key1] = matches / total
+
+    return agreement_matrix
+
 
 
 
@@ -168,18 +195,31 @@ if st.button("🤖 Initiate LLMS!"):
 
     with st.spinner("🚧 Calculating Majority Vote and accuracy metrics"):
         llm_response["majority"] = get_majority_vote(llm_response)
-        llm_response["glad"] = list(glad_output['labels'].values())
+        llm_response["GLAD"] = list(glad_output['labels'].values())
         d = {}
         for k, v in llm_response.items():
             acc_value = round(accuracy_with_none_penalty(list(df_gt['gt'].values), v) * 100, 2)
             d[k] = f"{acc_value} %"
+        time.sleep(1)
 
         df_acc = pd.DataFrame([d]).T.reset_index()
-        df.columns = ["model", "accuracy"]
+        df_acc.columns = ["model", "accuracy"]
         # styler = df.style.format(subset=['accuracy'], decimal=',', precision=1)
         # st.write(styler.to_html(), unsafe_allow_html=True)
-        st.dataframe(df_acc)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.header("Model Performances")
+            st.dataframe(df_acc)
+        time.sleep(1)
+        with col2:
+            st.header("Model Disagreement")
+            df_agreement = calculate_agreement_matrix(llm_response).fillna(0)
+            fig = plt.figure(figsize=(8, 8))
+            sns.heatmap(df_agreement.fillna(0), annot=True, linewidth=.5, cmap=sns.cubehelix_palette(as_cmap=True))
 
+            st.pyplot(fig)
+
+    time.sleep(3)
 
     # data explorer
     question_d = {"question": df_gt['question'],
@@ -190,8 +230,8 @@ if st.button("🤖 Initiate LLMS!"):
     df_question = pd.DataFrame.from_dict(question_d)
     
 
-    time.sleep(2)
-    st.markdown("""---""")
 
+
+    st.markdown("""---""")
 
     st.dataframe(df_question)
