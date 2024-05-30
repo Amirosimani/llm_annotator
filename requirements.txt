@@ -13,4 +13,4 @@ SentencePiece==0.2.0
 transformers==4.40.0
 datasets==2.19.1
 streamlit==1.35.0
-
+ipywidgets
