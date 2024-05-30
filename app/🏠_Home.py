@@ -16,7 +16,9 @@ import matplotlib.pyplot as plt
 sys.path.insert(1, "/usr/local/google/home/amirimani/Desktop/projects/llm_annotator")
 from config import PALM_CONFIG, GEMINI_CONFIG
 
-st.title('LLM Ensemble - Whose Vote to Count?')
+st.title('The Future of Labeling')
+st.subheader('A Symphony of Collaboration')
+
 
 col1, col2 = st.columns(2)
 user_data = col1.file_uploader("Upload your own data")
@@ -108,7 +110,7 @@ def generate_response():
 
     progress_text = " 🤖 Generating LLM responses. Please wait..."
     with st.spinner(progress_text):
-        time.sleep(5)
+        time.sleep(10)
 
     return dataset
 
@@ -181,10 +183,10 @@ if st.button("🤖 Initiate LLMS!"):
     my_bar = st.progress(0, text=progress_text)
 
     for precent_complete in range(100):
-        time.sleep(0.01)
+        time.sleep(0.08)
         from utils import glad
         
-    time.sleep(0.08)
+    time.sleep(0.1)
     my_bar.progress(precent_complete + 1, text=progress_text)
     glad_output = glad("./data/20240530/llm_response_50__20240530.txt")
     with open("./data/20240530/llm_response_50__20240530.json", "r") as f:
@@ -200,7 +202,7 @@ if st.button("🤖 Initiate LLMS!"):
         for k, v in llm_response.items():
             acc_value = round(accuracy_with_none_penalty(list(df_gt['gt'].values), v) * 100, 2)
             d[k] = f"{acc_value} %"
-        time.sleep(1)
+        time.sleep(3)
 
         df_acc = pd.DataFrame([d]).T.reset_index()
         df_acc.columns = ["model", "accuracy"]
@@ -210,7 +212,7 @@ if st.button("🤖 Initiate LLMS!"):
         with col1:
             st.header("Model Performances")
             st.dataframe(df_acc)
-        time.sleep(1)
+        time.sleep(5)
         with col2:
             st.header("Model Disagreement")
             df_agreement = calculate_agreement_matrix(llm_response).fillna(0)
@@ -219,7 +221,7 @@ if st.button("🤖 Initiate LLMS!"):
 
             st.pyplot(fig)
 
-    time.sleep(3)
+    time.sleep(8)
 
     # data explorer
     question_d = {"question": df_gt['question'],
