@@ -21,21 +21,24 @@ st.subheader('A Symphony of Collaboration')
 
 
 col1, col2 = st.columns(2)
-user_data = col1.file_uploader("Upload your own data")
+user_data = col1.file_uploader("Upload your own data", disabled=True)
 benchmark_data = col2.selectbox(
    "Popular LLM Benchmarks",
-   ("ARC", "HellaSwag", "HumanEval", "MMLU", "SuperGLUE"),
+   (
+       "MMLU", 
+       ),
    index=None,
    placeholder="Select a dataset...",
 )
+n_sample = col2.number_input("Select sample size. Default value is 100")
 st.write("You selected:", benchmark_data)
 
 model_options = st.multiselect(
     "Select your models from Vertex Model Garden",
     [
      "Gemini 1.0 Pro", "Gemini 1.5 Pro", "Gemini 1.5 Flash", 
-     "Gemini Ultra", "Gemma 2b", "Gemma 7b", "Claude 3 Haiku", 
-     "Claude 3 Sonnet", "PaLM 2 Text Bison"
+     "Gemini Ultra", 
+    #  "Gemma 2b", "Gemma 7b", "Claude 3 Haiku", "Claude 3 Sonnet", "PaLM 2 Text Bison"
      ],
     ["Gemini 1.0 Pro", "Gemini 1.5 Pro"]
     )
@@ -78,11 +81,10 @@ st.markdown("""---""")
 def generate_response():
 
     seed = 42
-    n_sample = 100
     with st.spinner("💾 Loading data..."):
         from datasets import load_dataset
         dataset = load_dataset("cais/mmlu", "all")
-        n_sample = 100
+        n_sample = 1000
         # # take a small sample for dev purposes
         dataset = dataset['test'].shuffle(seed=seed).select(range(n_sample))
     
@@ -188,11 +190,11 @@ if st.button("🤖 Initiate LLMS!"):
         
     time.sleep(0.1)
     my_bar.progress(precent_complete + 1, text=progress_text)
-    glad_output = glad("./data/20240530/llm_response_50__20240530.txt")
-    with open("./data/20240530/llm_response_50__20240530.json", "r") as f:
+    glad_output = glad("./data/20240530/llm_response_1000__20240530.txt")
+    with open("./data/20240530/llm_response_1000_gemini__20240530.json", "r") as f:
         llm_response = json.load(f)
 
-    df_gt = pd.read_csv('./data/20240530/gt_50__20240530.csv')
+    df_gt = pd.read_csv('./data/20240530/gt_1000__20240530.csv')
 
 
     with st.spinner("🚧 Calculating Majority Vote and accuracy metrics"):
@@ -202,17 +204,18 @@ if st.button("🤖 Initiate LLMS!"):
         for k, v in llm_response.items():
             acc_value = round(accuracy_with_none_penalty(list(df_gt['gt'].values), v) * 100, 2)
             d[k] = f"{acc_value} %"
-        time.sleep(3)
-
+        time.sleep(0.5)
+        
         df_acc = pd.DataFrame([d]).T.reset_index()
         df_acc.columns = ["model", "accuracy"]
+
         # styler = df.style.format(subset=['accuracy'], decimal=',', precision=1)
         # st.write(styler.to_html(), unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
             st.header("Model Performances")
             st.dataframe(df_acc)
-        time.sleep(5)
+        time.sleep(3)
         with col2:
             st.header("Model Disagreement")
             df_agreement = calculate_agreement_matrix(llm_response).fillna(0)
@@ -221,7 +224,7 @@ if st.button("🤖 Initiate LLMS!"):
 
             st.pyplot(fig)
 
-    time.sleep(8)
+    time.sleep(3)
 
     # data explorer
     question_d = {"question": df_gt['question'],
