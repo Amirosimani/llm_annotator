@@ -546,7 +546,7 @@ class Aggregate:
         return dQdAlpha, dQdBeta
     
     @staticmethod
-    def output(data, save=True):
+    def output(data, save):
         results = {}
         # Alpha (worker abilities)
         results['alpha'] = {i: data.alpha[i] for i in range(data.numLabelers)}
@@ -582,12 +582,12 @@ class Aggregate:
     
 
     @staticmethod
-    def glad(filename):
+    def glad(filename, save=False):
         # data = load_data(data, task_config)
         data = Aggregate.load_data(filename)
         Aggregate.EM(data)
 
-        return Aggregate.output(data)
+        return Aggregate.output(data, save)
 
 
 
