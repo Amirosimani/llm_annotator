@@ -1,14 +1,12 @@
-import re
+import os
 import logging
 import asyncio
 import numpy as np
 import scipy as sp
 from datetime import datetime
-from collections import Counter
-from itertools import combinations
 from asynciolimiter import Limiter
 from tqdm.asyncio import tqdm_asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 import vertexai
@@ -17,20 +15,18 @@ import vertexai
 from config import VALID_MODELS, GEMINI_CONFIG, PALM_CONFIG, VERBOSE
 
 
-def init_logger():
-    global logger
-    logger = logging.getLogger('base')
-    logger.setLevel(logging.DEBUG)
+def init_logger(verbose=False):
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG if verbose else logging.ERROR)
     log_fmt = '%(asctime)s/%(name)s[%(levelname)s]: %(message)s'
     logging.basicConfig(format=log_fmt)
 
 init_logger()
 
 THRESHOLD = 1e-5
-
-verbose = False
-debug = False
-logger = None
+VERBOSE = False
+DEBUG = False
+LOGGER = None
 
 
 class Annotate:
@@ -235,12 +231,11 @@ class Annotate:
 
 
 class Aggregate:
-    def __init__(self):
-        global logger
-        logger = logging.getLogger('GLAD')
-        logger.setLevel(logging.DEBUG)
-        log_fmt = '%(asctime)s/%(name)s[%(levelname)s]: %(message)s'
-        logging.basicConfig(format=log_fmt)
+    def __init__(self, verbose=VERBOSE):
+
+         # Initialize logger with the desired level based on verbose setting
+        self.logger = logging.getLogger('Aggregate')
+        self.logger.setLevel(logging.DEBUG if verbose else logging.ERROR)  
 
     class Dataset:
         def __init__(self, labels=None,
@@ -286,17 +281,15 @@ class Aggregate:
             data.priorZ = np.array([float(x) for x in header[4:]])
             assert len(data.priorZ) == data.numClasses, 'Incorrect input header'
             assert data.priorZ.sum() == 1, 'Incorrect priorZ given'
-            if verbose:
-                logger.info('Reading {} labels of {} labelers over {} tasks for prior P(Z) = {}'.format(data.numLabels,
-                                                                                                        data.numLabelers,
-                                                                                                        data.numTasks,
-                                                                                                        data.priorZ))
+            logging.debug('Reading {} labels of {} labelers over {} tasks for prior P(Z) = {}'.format(data.numLabels,
+                                                                                                    data.numLabelers,
+                                                                                                    data.numTasks,
+                                                                                                    data.priorZ))
             # Read Labels
             data.labels = np.zeros((data.numTasks, data.numLabelers))
             for line in f:
                 task, labeler, label = map(int, line.split())
-                if debug:
-                    logger.info("Read: task({})={} by labeler {}".format(task, label, labeler))
+                logging.debug("Read: task({})={} by labeler {}".format(task, label, labeler))
                 data.labels[task][labeler] = label + 1
         # Initialize Probs
         data.priorAlpha = np.ones(data.numLabelers)
@@ -330,7 +323,7 @@ class Aggregate:
         Q = Aggregate.computeQ(data)
         counter = 1
         while abs((Q - lastQ) / lastQ) > THRESHOLD:
-            if verbose: logger.info('EM: iter={}'.format(counter))
+            logging.info('EM: iter={}'.format(counter))
             lastQ = Q
             Aggregate.EStep(data)
             Aggregate.MStep(data)
@@ -362,7 +355,7 @@ class Aggregate:
             # Return log likelihood
             return correct + wrong
 
-        if verbose: logger.info('EStep')
+        logging.info('EStep')
         data.probZ = np.tile(np.log(data.priorZ), data.numTasks).reshape(data.numTasks, data.numClasses)
 
         ab = np.dot(np.array([np.exp(data.beta)]).T, np.array([data.alpha]))
@@ -428,14 +421,13 @@ class Aggregate:
         return np.r_[-dQdAlpha, -dQdBeta]
 
     @staticmethod
-    def MStep(data):
-        if verbose: logger.info('MStep')
+    def MStep(data, verbose=False):
+        logging.info('MStep')
         initial_params = Aggregate.packX(data)
         params = sp.optimize.minimize(fun=Aggregate.f, x0=initial_params, args=(data,), method='CG',
                                       jac=Aggregate.df, tol=0.01,
                                       options={'maxiter': 25, 'disp': verbose})
-        if debug:
-            logger.debug(params)
+        logging.debug(params)
         Aggregate.unpackX(params.x, data)
 
     @staticmethod
@@ -453,14 +445,14 @@ class Aggregate:
         logSigma = Aggregate.logsigmoid(ab)  # logP
         idxna = np.isnan(logSigma)
         if np.any(idxna):
-            logger.warning('an invalid value was assigned to np.log [computeQ]')
+            logging.warning('an invalid value was assigned to np.log [computeQ]')
             logSigma[idxna] = ab[idxna]  # For large negative x, -log(1 + exp(-x)) = x
 
         # logOneMinusSigma = - np.log(1 + np.exp(ab))
         logOneMinusSigma = Aggregate.logsigmoid(-ab) - np.log(float(data.numClasses - 1))  # log((1-P)/(K-1))
         idxna = np.isnan(logOneMinusSigma)
         if np.any(idxna):
-            logger.warning('an invalid value was assigned to np.log [computeQ]')
+            logging.warning('an invalid value was assigned to np.log [computeQ]')
             logOneMinusSigma[idxna] = -ab[idxna]  # For large positive x, -log(1 + exp(x)) = x
 
         for k in range(data.numClasses):
@@ -475,10 +467,9 @@ class Aggregate:
         # Add Gaussian (standard normal) prior for beta
         Q += np.log(sp.stats.norm.pdf(data.beta - data.priorBeta)).sum()
 
-        if debug:
-            logger.debug('a[0]={} a[1]={} a[2]={} b[0]={}'.format(data.alpha[0], data.alpha[1],
-                                                                data.alpha[2], data.beta[0]))
-            logger.debug('Q={}'.format(Q))
+        logging.debug('a[0]={} a[1]={} a[2]={} b[0]={}'.format(data.alpha[0], data.alpha[1],
+                                                            data.alpha[2], data.beta[0]))
+        logging.debug('Q={}'.format(Q))
         if np.isnan(Q):
             return -np.inf
         return Q
@@ -550,8 +541,7 @@ class Aggregate:
                                             (data.labels == 0),
                                         data.probZ[:, k]) * np.exp(data.beta)
 
-        if debug:
-            logger.debug('dQdAlpha[0]={} dQdAlpha[1]={} dQdAlpha[2]={} dQdBeta[0]={}'.format(dQdAlpha[0], dQdAlpha[1],
+        logging.debug('dQdAlpha[0]={} dQdAlpha[1]={} dQdAlpha[2]={} dQdBeta[0]={}'.format(dQdAlpha[0], dQdAlpha[1],
                                                                                             dQdAlpha[2], dQdBeta[0]))
         return dQdAlpha, dQdBeta
     
