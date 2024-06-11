@@ -3,6 +3,7 @@ import logging
 import asyncio
 import numpy as np
 import scipy as sp
+from collections import Counter
 from datetime import datetime
 from asynciolimiter import Limiter
 from tqdm.asyncio import tqdm_asyncio
@@ -236,6 +237,27 @@ class Aggregate:
          # Initialize logger with the desired level based on verbose setting
         self.logger = logging.getLogger('Aggregate')
         self.logger.setLevel(logging.DEBUG if verbose else logging.ERROR)  
+
+    @staticmethod
+    def majority_vote(label_dict: Dict[str, List[int]]) -> List[int]:
+        """
+        Finds the majority value for each element across multiple lists within a dictionary.
+
+        Args:
+            label_dict: A dictionary where keys are identifiers and values are lists of labels.
+
+        Returns:
+            A list of majority values corresponding to each element position.
+    """
+        list_of_labels = list(label_dict.values())  # Extract values into a list
+        majority_values = []
+
+        for elements in zip(*list_of_labels):
+            element_counts = Counter(elements)
+            most_common_element = element_counts.most_common(1)[0]
+            majority_values.append(most_common_element[0])
+
+        return majority_values
 
     class Dataset:
         def __init__(self, labels=None,
