@@ -186,9 +186,10 @@ if st.button("🤖 Initiate LLMS!"):
 
     for precent_complete in range(100):
         time.sleep(0.08)
-        from utils import glad
+        from utils import Aggregate
         
     time.sleep(0.1)
+    glad = Aggregate().glad
     my_bar.progress(precent_complete + 1, text=progress_text)
     glad_output = glad("./data/20240530/llm_response_1000__20240530.txt")
     with open("./data/20240530/llm_response_1000_gemini__20240530.json", "r") as f:
