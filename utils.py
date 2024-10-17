@@ -612,6 +612,98 @@ class Aggregate:
         return Aggregate.output(data, save)
 
 
+class Evaluate:
+    def __init__(self, verbose=False):
+        # Initialize logger with the desired level based on verbose setting
+        self.logger = logging.getLogger('Aggregate')
+        self.logger.setLevel(logging.DEBUG if verbose else logging.ERROR)
+
+    def evaluate_entity_extraction(self, predicted_entities, true_entities):
+        """
+        Evaluate entity extraction performance using precision, recall, F1 score, and exact match ratio.
+
+        Parameters:
+        - predicted_entities: A list of predicted entities, where each entity is represented by a dictionary.
+        - true_entities: A list of true entities, where each entity is represented by a dictionary.
+
+        Returns:
+        - A dictionary containing precision, recall, F1 score, and exact match ratio.
+        """
+        # Flatten the predicted and true entities
+        predicted_flat = [entity for sublist in predicted_entities for entity in sublist]
+        true_flat = [entity for sublist in true_entities for entity in sublist]
+
+        # Convert to sets for easier comparison (case insensitive)
+        predicted_set = {(ent['text'][0].lower(), ent['type'].lower()) for ent in predicted_flat}
+        true_set = {(ent['text'][0].lower(), ent['type'].lower()) for ent in true_flat}
+
+        # Calculate True Positives, False Positives, and False Negatives
+        true_positives = len(predicted_set & true_set)
+        false_positives = len(predicted_set - true_set)
+        false_negatives = len(true_set - predicted_set)
+
+        # Precision, Recall, and F1 Score calculations
+        precision = true_positives / (true_positives + false_positives) if true_positives + false_positives > 0 else 0.0
+        recall = true_positives / (true_positives + false_negatives) if true_positives + false_negatives > 0 else 0.0
+        f1 = (2 * precision * recall / (precision + recall)) if precision + recall > 0 else 0.0
+
+        # Exact Match Ratio
+        exact_match_ratio = len(predicted_set & true_set) / len(true_set) if len(true_set) > 0 else 0.0
+
+        # Results dictionary
+        results = {
+            'Precision': precision,
+            'Recall': recall,
+            'F1 Score': f1,
+            'Exact Match Ratio': exact_match_ratio,
+            'Total Predicted Entities': len(predicted_flat),
+            'Total True Entities': len(true_flat)
+        }
+
+        return results
+
+    def bootstrap_evaluation(self, predicted_entities, true_entities, B=500):
+        """
+        Calculate bootstrap confidence intervals for entity extraction performance metrics.
+
+        Parameters:
+        - predicted_entities: A list of predicted entities (nested list format).
+        - true_entities: A list of true entities (nested list format).
+        - B: Number of bootstrap samples to draw.
+
+        Returns:
+        - A dictionary containing confidence intervals for precision, recall, F1 score, and exact match ratio.
+        """
+        n = len(predicted_entities)
+        metrics = np.zeros((B, 4))  # Precision, recall, F1, exact match ratio
+
+        for i in range(B):
+            # Resample indices with replacement
+            indices = np.random.choice(n, n, replace=True)
+            resampled_predicted = [predicted_entities[idx] for idx in indices]
+            resampled_true = [true_entities[idx] for idx in indices]
+
+            # Evaluate on resampled data
+            result = self.evaluate_entity_extraction(resampled_predicted, resampled_true)
+            metrics[i] = [result['Precision'], result['Recall'], result['F1 Score'], result['Exact Match Ratio']]
+
+        # Confidence intervals
+        ci_precision = np.percentile(metrics[:, 0], [2.5, 97.5])
+        ci_recall = np.percentile(metrics[:, 1], [2.5, 97.5])
+        ci_f1 = np.percentile(metrics[:, 2], [2.5, 97.5])
+        ci_exact_match = np.percentile(metrics[:, 3], [2.5, 97.5])
+
+        # Results
+        confidence_intervals = {
+            'Precision CI': ci_precision,
+            'Recall CI': ci_recall,
+            'F1 Score CI': ci_f1,
+            'Exact Match Ratio CI': ci_exact_match
+        }
+
+        return confidence_intervals
+
+
 
 if __name__ == "__main__":
     ann = Annotate(verbose=VERBOSE)
