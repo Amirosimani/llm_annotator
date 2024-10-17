@@ -4,9 +4,9 @@ VERBOSE=False
 
 GEMINI_CONFIG = {
     "config_name": "default",
-    "model": "gemini-1.0-pro-002",
+    "model": "gemini-1.5-pro",
     "project_config": {
-        "qpm": 300,
+        "qpm": 200,
         "project": "amir-genai-bb", 
         "location": "us-central1"
     },

@@ -15,3 +15,4 @@ datasets==2.19.1
 streamlit==1.35.0
 ipywidgets
 tabulate
+bioc
