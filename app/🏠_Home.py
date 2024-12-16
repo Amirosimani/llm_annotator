@@ -16,8 +16,8 @@ import matplotlib.pyplot as plt
 sys.path.insert(1, "/usr/local/google/home/amirimani/Desktop/projects/llm_annotator")
 from config import PALM_CONFIG, GEMINI_CONFIG
 
-st.title('The Future of Labeling')
-st.subheader('A Symphony of Collaboration')
+st.title('The Future of Evaluation')
+st.subheader('panel of LLMs')
 
 
 col1, col2 = st.columns(2)
