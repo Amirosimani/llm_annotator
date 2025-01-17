@@ -135,11 +135,11 @@ class Annotate:
                 pbar.update(1)  # Update progress after each task is processed
         
         # Organize the output as a dictionary based on the prompt
-        output_dict = {prompt: {} for prompt in prompts}
+        output_dict = {f"prompt_{i+1}": {} for i in range(len(prompts))}
         for i, prompt in enumerate(prompts):
             for j, model_name in enumerate(model_names):
                 response = results[i * len(model_names) + j][0]
-                output_dict[prompt][model_name] = response
+                output_dict[f"prompt_{i+1}"][model_name] = response
 
         # Print the organized results if verbose
         if verbose:
