@@ -8,7 +8,9 @@ from datetime import datetime
 from asynciolimiter import Limiter
 from dotenv import load_dotenv
 from tqdm.asyncio import tqdm_asyncio
-
+from tqdm import tqdm
+from google import genai
+from google.genai import types
 from typing import Any, Dict, List, Callable
 from config import GENERATION_CONFIG
 
@@ -43,21 +45,13 @@ class Annotate:
             verbose (bool): Whether to enable verbose logging.
             concurrency_limit (int): The maximum number of concurrent tasks.
         """
-        self.logger = logging.getLogger("Annotate")
-        log_level = logging.DEBUG if verbose else logging.ERROR
-        self.logger.setLevel(log_level)
-
-        # Ensure the logger has at least one handler
-        if not self.logger.hasHandlers():
-            handler = logging.StreamHandler()
-            handler.setLevel(log_level)
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
-
         self.concurrency_limit = concurrency_limit
 
-    async def __gemini(self, prompt: str) -> str:
+        # Initialize the GenAI client once
+        self.client = genai.Client(api_key=GEMINI_API_KEY)
+        logging.debug("GenAI client initialized.")
+
+    async def __gemini(self, prompt: str, model_name: str) -> str:
         """
         Asynchronously generates labels for datapoints using the Gemini Pro text dataset.
 
@@ -71,26 +65,23 @@ class Annotate:
             VertexAIError: If there's an issue with the Vertex AI initialization or model call.
             RateLimitExceededError: If the rate limiter indicates excessive API calls.
         """
-        from google import genai
-        from google.genai import types
 
-        client = genai.Client(api_key=GEMINI_API_KEY)
         try:
-            self.logger.debug(f"Processing prompt: {prompt}")
-            response = await client.aio.models.generate_content(
-                model="gemini-1.5-flash",
+            logging.debug(f"Processing prompt: {prompt}")
+            response = await self.client.aio.models.generate_content(
+                model=model_name,
                 contents=types.Part.from_text(prompt),
                 config=types.GenerateContentConfig(
                     **GENERATION_CONFIG["gemini"]
                 ),
             )
-            self.logger.debug(f"Response for prompt '{prompt}': {response.text}")
+            logging.debug(f"Response for prompt '{prompt}': {response.text}")
             return response.text
         except Exception as e:
-            self.logger.error(f"Error processing prompt '{prompt}': {e}")
+            logging.error(f"Error processing prompt '{prompt}': {e}")
             raise
 
-    async def rate_limited_task(self, prompt: str, llm_func: Callable[[str], Any], semaphore: asyncio.Semaphore) -> Any:
+    async def rate_limited_task(self, prompt: str, llm_func: Callable, semaphore: asyncio.Semaphore, model_name: str) -> Any:
         """
         Wrapper function for rate-limited execution of a task.
 
@@ -98,32 +89,80 @@ class Annotate:
             prompt (str): The input prompt.
             llm_func (Callable): The function to call for processing the prompt.
             semaphore (asyncio.Semaphore): Semaphore for limiting concurrency.
+            model_name (str): The name of the model to use for generation.
 
         Returns:
             Any: The result of the llm_func call.
         """
         async with semaphore:
-            self.logger.debug(f"Acquiring semaphore for prompt: {prompt}")
-            result = await llm_func(prompt)
-            self.logger.debug(f"Completed task for prompt: {prompt}")
+            logging.debug(f"Acquiring semaphore for prompt: {prompt}")
+            result = await llm_func(prompt, model_name)
+            logging.debug(f"Completed task for prompt: {prompt}")
             return result
 
-    async def process_prompts(self, prompts: List[str]) -> List[Any]:
+    async def process_prompts(self, prompts: List[str], model_name: str) -> List[Any]:
         """
         Processes a list of prompts with concurrency and rate-limiting.
 
         Args:
             prompts (List[str]): A list of prompts to process.
+            model_name (str): The name of the model to use for generation.
 
         Returns:
             List[Any]: A list of results from the model.
         """
         semaphore = asyncio.Semaphore(self.concurrency_limit)
-        tasks = [self.rate_limited_task(prompt, self.__gemini, semaphore) for prompt in prompts]
-        self.logger.info(f"Processing {len(prompts)} prompts with concurrency limit {self.concurrency_limit}.")
+        tasks = [self.rate_limited_task(prompt, self.__gemini, semaphore, model_name) for prompt in prompts]
+        logging.info(f"Processing {len(prompts)} prompts with concurrency limit {self.concurrency_limit}.")
         results = await asyncio.gather(*tasks)
-        self.logger.info(f"Completed processing all prompts.")
+        logging.info("Completed processing all prompts.")
         return results
+    
+    async def callLLM(self, prompts: list, model_names: list, verbose: bool = False, concurrency_limit: int = 3):
+        """
+        Processes prompts using the given models with concurrency and rate-limiting.
+
+        Args:
+            prompts (list): List of prompts to process.
+            model_names (list): List of model names to use for each prompt.
+            verbose (bool): Whether to enable verbose logging.
+            concurrency_limit (int): The maximum number of concurrent tasks.
+        """
+        init_logger(verbose)
+
+
+        self.concurrency_limit = concurrency_limit
+        self.client = genai.Client(api_key=GEMINI_API_KEY)
+
+        # Create tasks for each prompt-model combination
+        tasks = [
+            self.process_prompts([prompt], model_name)
+            for prompt in prompts
+            for model_name in model_names
+        ]
+
+        # Execute all tasks concurrently
+        # results = await asyncio.gather(*tasks)
+        with tqdm(total=len(tasks), desc="Processing Tasks", unit="task") as pbar:
+            results = await asyncio.gather(*tasks)
+            pbar.update(len(tasks)) 
+        
+        # Organize the output as a dictionary based on the prompt
+        output_dict = {prompt: {} for prompt in prompts}
+        
+        for i, prompt in enumerate(prompts):
+            for j, model_name in enumerate(model_names):
+                response = results[i * len(model_names) + j][0]
+                output_dict[prompt][model_name] = response
+
+        # Print the organized results if verbose
+        if verbose:
+            for prompt, responses in output_dict.items():
+                print(f"\nPrompt: {prompt}")
+                for model_name, response in responses.items():
+                    print(f"  Model: {model_name}\n  Response: {response}")
+        
+        return output_dict
 
 
 class Aggregate:
@@ -604,10 +643,13 @@ if __name__ == "__main__":
     import nest_asyncio
     nest_asyncio.apply() 
 
-    async def main():
-        prompts = ["Where is New York?", "Where is Paris?", "Where is Tokyo?", "Where is London?"]
-        annotator = Annotate(verbose=True, concurrency_limit=2)
-        results = await annotator.process_prompts(prompts)
-        print(f"Results: {results}")
+    prompts = [
+        "What is the capital of France?",
+        "Explain quantum entanglement.",
+        "Translate 'Hello, world!' to French.",
+    ]
 
-    asyncio.run(main())
+    model_names = ["gemini-1.5-flash", "gemini-2.0"]
+
+    annotator = Annotate(verbose=True, concurrency_limit=3)
+    result = asyncio.run(annotator.callLLM(prompts, model_names, verbose=True, concurrency_limit=3))
