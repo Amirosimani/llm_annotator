@@ -1,4 +1,6 @@
 models/
+notebooks/*.json
+data/DATASET_BONDS_PUBLIC-20241216T163059Z-001
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

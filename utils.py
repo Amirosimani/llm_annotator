@@ -7,7 +7,7 @@ from collections import Counter
 from datetime import datetime
 from asynciolimiter import Limiter
 from tqdm.asyncio import tqdm_asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Callable
 
 
 import vertexai
@@ -31,203 +31,92 @@ LOGGER = None
 
 
 class Annotate:
-    def __init__(self, verbose=VERBOSE):
-
-         # Initialize logger with the desired level based on verbose setting
-        self.logger = logging.getLogger('Annotate')
-        self.logger.setLevel(logging.DEBUG if verbose else logging.ERROR)  
-
-
-    async def __gemini(self, prompt:str, gemini_config: dict) -> List:
+    def __init__(self, verbose: bool = True, concurrency_limit: int = 2):
         """
-        Asynchronously generates labels for datapoints using a Gemini Pro text 
-        dataset order is presevered. safety measures are in place.
+        Initializes the Annotate class.
 
         Args:
-            prompt: The text input to be classified.
+            verbose (bool): Whether to enable verbose logging.
+            concurrency_limit (int): The maximum number of concurrent tasks.
+        """
+        self.logger = logging.getLogger("Annotate")
+        self.logger.setLevel(logging.DEBUG if verbose else logging.ERROR)
+        self.concurrency_limit = concurrency_limit
+
+    async def __gemini(self, prompt: str) -> str:
+        """
+        Asynchronously generates labels for datapoints using the Gemini Pro text dataset.
+
+        Args:
+            prompt (str): The text input to be classified.
 
         Returns:
-            A boolean value representing the model's classification.
-
+            str: The model's classification or response.
 
         Raises:
             VertexAIError: If there's an issue with the Vertex AI initialization or model call.
             RateLimitExceededError: If the rate limiter indicates excessive API calls.
-            Any exceptions raised by the `Annotate.__extract_binary_values` function.
         """
+        from google import genai
+        from google.genai import types
 
-        from vertexai.generative_models import GenerativeModel
-        import vertexai.preview.generative_models as generative_models
-
-        vertexai.init(project=gemini_config["project_config"]["project"], 
-                      location=gemini_config["project_config"]["location"])
-
-        safety_settings = {
-            generative_models.HarmCategory.HARM_CATEGORY_HATE_SPEECH: generative_models.HarmBlockThreshold.BLOCK_NONE,
-            generative_models.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: generative_models.HarmBlockThreshold.BLOCK_NONE,
-            generative_models.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: generative_models.HarmBlockThreshold.BLOCK_NONE,
-            generative_models.HarmCategory.HARM_CATEGORY_HARASSMENT: generative_models.HarmBlockThreshold.BLOCK_NONE,
-        }
-
-        rate_limiter = Limiter(gemini_config["project_config"]["qpm"]/60) # Limit to 300 requests per 60 second
-        model = GenerativeModel(gemini_config["model"],
-                                system_instruction=[
-                                "You are a helpful data labeler.",
-                                "Your mission is to label the input data based on the instruction you will receive.",
-                                ],
-                            )
-        await rate_limiter.wait()
+        client = genai.Client(api_key=GEMINI_API_KEY)
         try:
-            self.logger.debug(f"Sending prompt to Gemini: {prompt}")    
-            responses = model.generate_content(
-                [prompt],
-                generation_config=gemini_config["generation_config"],
-                safety_settings=safety_settings,
-                stream=False,
-                )
+            self.logger.debug(f"Processing prompt: {prompt}")
+            response = await client.aio.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=types.Part.from_text(prompt),
+                config=types.GenerateContentConfig(
+                    temperature=0,
+                    top_p=0.95,
+                    top_k=20,
+                    candidate_count=1,
+                    seed=5,
+                    max_output_tokens=100,
+                    stop_sequences=["STOP!"],
+                    presence_penalty=0.0,
+                    frequency_penalty=0.0,
+                ),
+            )
+            self.logger.debug(f"Response for prompt '{prompt}': {response.text}")
+            return response.text
         except Exception as e:
-            self.logger.error(f"Error in __gemini: {e}") 
+            self.logger.error(f"Error processing prompt '{prompt}': {e}")
             raise
-        self.logger.info(f"Gemini response received.")  # Info log
-        return(responses.text)
-    
-    async def __palm(self, prompt:str, palm_config: dict) -> List:
+
+    async def rate_limited_task(self, prompt: str, llm_func: Callable[[str], Any], semaphore: asyncio.Semaphore) -> Any:
         """
-        Asynchronously generates labels for datapoints using Bison model 
-        dataset order is presevered. safety measures are in place.
+        Wrapper function for rate-limited execution of a task.
 
         Args:
-            prompt: The text input to be classified.
+            prompt (str): The input prompt.
+            llm_func (Callable): The function to call for processing the prompt.
+            semaphore (asyncio.Semaphore): Semaphore for limiting concurrency.
 
         Returns:
-            A boolean value representing the model's classification.
-
-
-        Raises:
-            VertexAIError: If there's an issue with the Vertex AI initialization or model call.
-            RateLimitExceededError: If the rate limiter indicates excessive API calls.
-            Any exceptions raised by the `Annotate.__extract_binary_values` function.
+            Any: The result of the llm_func call.
         """
+        async with semaphore:
+            self.logger.debug(f"Acquiring semaphore for prompt: {prompt}")
+            result = await llm_func(prompt)
+            self.logger.debug(f"Completed task for prompt: {prompt}")
+            return result
 
-        from vertexai.language_models import TextGenerationModel
-
-        vertexai.init(project=palm_config["project_config"]["project"], 
-                      location=palm_config["project_config"]["location"])
-
-
-        rate_limiter = Limiter(palm_config["project_config"]["qpm"]/60) # Limit to 300 requests per 60 second
-        model = TextGenerationModel.from_pretrained(palm_config["model"])
-        await rate_limiter.wait()
-        try:
-            self.logger.debug(f"Sending prompt to PaLM: {prompt}")    
-            responses = model.predict(
-                prompt,
-                **palm_config["generation_config"]
-                )
-        except Exception as e:
-            self.logger.error(f"Error in __palm: {e}") 
-            raise
-        self.logger.info(f"palm response received.")  # Info log
-        return(responses.text)
-    
-    async def __claude(self, prompt:str, claude_config: dict) -> List:
+    async def process_prompts(self, prompts: List[str]) -> List[Any]:
         """
-        Asynchronously generates labels for datapoints using Claude Haiku 
-        dataset order is presevered.
+        Processes a list of prompts with concurrency and rate-limiting.
 
         Args:
-            prompt: The text input to be classified.
+            prompts (List[str]): A list of prompts to process.
 
         Returns:
-            A boolean value representing the model's classification.
-
-
-        Raises:
-            VertexAIError: If there's an issue with the Vertex AI initialization or model call.
-            RateLimitExceededError: If the rate limiter indicates excessive API calls.
-            Any exceptions raised by the `Annotate.__extract_binary_values` function.
+            List[Any]: A list of results from the model.
         """
-        from anthropic import AnthropicVertex
-
-        client = AnthropicVertex(region=claude_config["project_config"]["location"], 
-                                 project_id=claude_config["project_config"]["project"])
-
-
-        rate_limiter = Limiter(claude_config["project_config"]["qpm"]/60) # Limit to 60 requests per 60 second
-
-        await rate_limiter.wait()
-        try:
-            self.logger.debug(f"Sending prompt to Claude: {prompt}")
-            responses = client.messages.create(
-                max_tokens=1024,
-                messages=[
-                    {"role": "user",
-                    "content": prompt,
-                    }
-                    ],
-                    model=claude_config["model"],
-                    )
-        except Exception as e:
-            self.logger.error(f"Error in __claude: {e}")
-            raise
-        self.logger.info(f"Claude response received.")  # Info log
-        return(responses.content[0].text)
-
-    async def classification(self, prompts: List[str], models: List[str], model_configs,
-                             valid_models=VALID_MODELS) -> List[Any]:
-        """Performs text classification labeling.
-
-        Args:
-            prompts: A list of text prompts to classify.
-            models: The names of the models to use for classification.
-            valid_models: A list of valid model names.
-            gemini_config: (Optional) Gemini configuration if "gemini" is in `models`.
-            palm_config: (Optional) PaLM configuration if "palm" is in `models`.
-
-        Returns:
-            A list of classification results for each model (None for failed tasks).
-
-        Raises:
-            ValueError: If an unsupported model or missing configuration is specified.
-        """
-        if not all(model in valid_models for model in models):
-            self.logger.error(f"Unsupported model: {set(models) - set(valid_models)}")
-            raise ValueError(f"Unsupported models in valid_models. Please use models from {valid_models}")
-
-        # Create tasks for each model and config combination
-        all_tasks = {}
-        total_tasks = len(prompts) * sum(len(configs) for model, configs in model_configs.items() if model in models)
-
-        with tqdm_asyncio(total=total_tasks, desc="Creating tasks") as pbar:
-            for prompt in prompts:
-                for model in models:
-                    configs = model_configs[model] if isinstance(model_configs[model], list) else [model_configs[model]]
-                    for config in configs:
-                        task_key = f"{model}_{config['config_name']}"  # Assuming each config has a unique 'config_name' key
-                        if task_key not in all_tasks:
-                            all_tasks[task_key] = []
-                        if model == "gemini":
-                            all_tasks[task_key].append(asyncio.create_task(self.__gemini(prompt, config)))
-                        elif model == "palm":
-                            all_tasks[task_key].append(asyncio.create_task(self.__palm(prompt, config)))
-                        # Add other models here as needed
-                        pbar.update(1)  # Update progress bar for each created task
-
-        # Collect results for each model
-        results = {}
-        for task_key, tasks in all_tasks.items():
-            with tqdm_asyncio(total=len(tasks), desc=f"Gathering {task_key} results") as pbar:
-                model_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                for i, result in enumerate(model_results):
-                    if isinstance(result, Exception):
-                        self.logger.error(f"{task_key} Task {i} failed: {result}")
-                        model_results[i] = None  # Store None for failed tasks
-                    pbar.update(1)  # Update the progress bar
-
-                self.logger.debug(f"Classification results for {task_key}: {model_results}")
-                results[task_key] = model_results
-
+        semaphore = asyncio.Semaphore(self.concurrency_limit)
+        tasks = [self.rate_limited_task(prompt, self.__gemini, semaphore) for prompt in prompts]
+        self.logger.info(f"Processing {len(prompts)} prompts with concurrency limit {self.concurrency_limit}.")
+        results = await asyncio.gather(*tasks)
+        self.logger.info(f"Completed processing all prompts.")
         return results
 
 
@@ -706,11 +595,13 @@ class Evaluate:
 
 
 if __name__ == "__main__":
-    ann = Annotate(verbose=VERBOSE)
-    import time
-    s = time.perf_counter()
-    prompts = ["where is paris?", "whare is tehran"]
-    asyncio.run(ann.classification(prompts, model="gemini"))
-    elapsed = time.perf_counter() - s
-    print(f"{__file__} executed in {elapsed:0.2f} seconds.")
+    import nest_asyncio
+    nest_asyncio.apply() 
 
+    async def main():
+        prompts = ["Where is New York?", "Where is Paris?", "Where is Tokyo?", "Where is London?"]
+        annotator = Annotate(verbose=True, concurrency_limit=2)
+        results = await annotator.process_prompts(prompts)
+        print(f"Results: {results}")
+
+    asyncio.run(main())
