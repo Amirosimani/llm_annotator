@@ -1,3 +1,4 @@
+.env
 models/
 notebooks/*.json
 data/DATASET_BONDS_PUBLIC-20241216T163059Z-001

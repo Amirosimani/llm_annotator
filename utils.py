@@ -6,14 +6,18 @@ import scipy as sp
 from collections import Counter
 from datetime import datetime
 from asynciolimiter import Limiter
+from dotenv import load_dotenv
 from tqdm.asyncio import tqdm_asyncio
+
 from typing import Any, Dict, List, Callable
+from config import GENERATION_CONFIG
 
+# Load environment variables from .env
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise EnvironmentError("GEMINI_API_KEY is not set in the environment variables or .env file.")
 
-import vertexai
-
-
-from config import VALID_MODELS, GEMINI_CONFIG, PALM_CONFIG, VERBOSE
 
 
 def init_logger(verbose=False):
@@ -31,7 +35,7 @@ LOGGER = None
 
 
 class Annotate:
-    def __init__(self, verbose: bool = True, concurrency_limit: int = 2):
+    def __init__(self, verbose: bool = False, concurrency_limit: int = 2):
         """
         Initializes the Annotate class.
 
@@ -40,7 +44,17 @@ class Annotate:
             concurrency_limit (int): The maximum number of concurrent tasks.
         """
         self.logger = logging.getLogger("Annotate")
-        self.logger.setLevel(logging.DEBUG if verbose else logging.ERROR)
+        log_level = logging.DEBUG if verbose else logging.ERROR
+        self.logger.setLevel(log_level)
+
+        # Ensure the logger has at least one handler
+        if not self.logger.hasHandlers():
+            handler = logging.StreamHandler()
+            handler.setLevel(log_level)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+
         self.concurrency_limit = concurrency_limit
 
     async def __gemini(self, prompt: str) -> str:
@@ -67,15 +81,7 @@ class Annotate:
                 model="gemini-1.5-flash",
                 contents=types.Part.from_text(prompt),
                 config=types.GenerateContentConfig(
-                    temperature=0,
-                    top_p=0.95,
-                    top_k=20,
-                    candidate_count=1,
-                    seed=5,
-                    max_output_tokens=100,
-                    stop_sequences=["STOP!"],
-                    presence_penalty=0.0,
-                    frequency_penalty=0.0,
+                    **GENERATION_CONFIG["gemini"]
                 ),
             )
             self.logger.debug(f"Response for prompt '{prompt}': {response.text}")
