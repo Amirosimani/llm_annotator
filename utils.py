@@ -3,15 +3,15 @@ import logging
 import asyncio
 import numpy as np
 import scipy as sp
-from collections import Counter
-from datetime import datetime
-from asynciolimiter import Limiter
-from dotenv import load_dotenv
-from tqdm.asyncio import tqdm_asyncio
 from tqdm import tqdm
+from datetime import datetime
+from itertools import product
+from collections import Counter
+from dotenv import load_dotenv
+from typing import Any, Dict, List, Callable
+
 from google import genai
 from google.genai import types
-from typing import Any, Dict, List, Callable
 from config import GENERATION_CONFIG
 
 # Load environment variables from .env
@@ -45,11 +45,9 @@ class Annotate:
             verbose (bool): Whether to enable verbose logging.
             concurrency_limit (int): The maximum number of concurrent tasks.
         """
+        self.logger = logging.getLogger()  # Use the logger initialized globally
         self.concurrency_limit = concurrency_limit
-
-        # Initialize the GenAI client once
         self.client = genai.Client(api_key=GEMINI_API_KEY)
-        logging.debug("GenAI client initialized.")
 
     async def __gemini(self, prompt: str, model_name: str) -> str:
         """
@@ -60,14 +58,9 @@ class Annotate:
 
         Returns:
             str: The model's classification or response.
-
-        Raises:
-            VertexAIError: If there's an issue with the Vertex AI initialization or model call.
-            RateLimitExceededError: If the rate limiter indicates excessive API calls.
         """
-
         try:
-            logging.debug(f"Processing prompt: {prompt}")
+            self.logger.debug(f"Processing prompt: {prompt}")
             response = await self.client.aio.models.generate_content(
                 model=model_name,
                 contents=types.Part.from_text(prompt),
@@ -75,10 +68,10 @@ class Annotate:
                     **GENERATION_CONFIG["gemini"]
                 ),
             )
-            logging.debug(f"Response for prompt '{prompt}': {response.text}")
+            self.logger.debug(f"Response for prompt '{prompt}': {response.text}")
             return response.text
         except Exception as e:
-            logging.error(f"Error processing prompt '{prompt}': {e}")
+            self.logger.error(f"Error processing prompt '{prompt}': {e}")
             raise
 
     async def rate_limited_task(self, prompt: str, llm_func: Callable, semaphore: asyncio.Semaphore, model_name: str) -> Any:
@@ -95,9 +88,9 @@ class Annotate:
             Any: The result of the llm_func call.
         """
         async with semaphore:
-            logging.debug(f"Acquiring semaphore for prompt: {prompt}")
+            self.logger.debug(f"Acquiring semaphore for prompt: {prompt}")
             result = await llm_func(prompt, model_name)
-            logging.debug(f"Completed task for prompt: {prompt}")
+            self.logger.debug(f"Completed task for prompt: {prompt}")
             return result
 
     async def process_prompts(self, prompts: List[str], model_name: str) -> List[Any]:
@@ -113,11 +106,9 @@ class Annotate:
         """
         semaphore = asyncio.Semaphore(self.concurrency_limit)
         tasks = [self.rate_limited_task(prompt, self.__gemini, semaphore, model_name) for prompt in prompts]
-        logging.info(f"Processing {len(prompts)} prompts with concurrency limit {self.concurrency_limit}.")
-        results = await asyncio.gather(*tasks)
-        logging.info("Completed processing all prompts.")
-        return results
-    
+        self.logger.info(f"Processing {len(prompts)} prompts with concurrency limit {self.concurrency_limit}.")
+        return await asyncio.gather(*tasks)
+
     async def callLLM(self, prompts: list, model_names: list, verbose: bool = False, concurrency_limit: int = 3):
         """
         Processes prompts using the given models with concurrency and rate-limiting.
@@ -129,27 +120,22 @@ class Annotate:
             concurrency_limit (int): The maximum number of concurrent tasks.
         """
         init_logger(verbose)
-
-
         self.concurrency_limit = concurrency_limit
-        self.client = genai.Client(api_key=GEMINI_API_KEY)
-
-        # Create tasks for each prompt-model combination
         tasks = [
             self.process_prompts([prompt], model_name)
-            for prompt in prompts
-            for model_name in model_names
+            for prompt, model_name in product(prompts, model_names)
         ]
-
-        # Execute all tasks concurrently
-        # results = await asyncio.gather(*tasks)
+        
+        # Use tqdm for progress tracking
         with tqdm(total=len(tasks), desc="Processing Tasks", unit="task") as pbar:
-            results = await asyncio.gather(*tasks)
-            pbar.update(len(tasks)) 
+            results = []
+            for task in tasks:
+                result = await task
+                results.append(result)
+                pbar.update(1)  # Update progress after each task is processed
         
         # Organize the output as a dictionary based on the prompt
         output_dict = {prompt: {} for prompt in prompts}
-        
         for i, prompt in enumerate(prompts):
             for j, model_name in enumerate(model_names):
                 response = results[i * len(model_names) + j][0]
